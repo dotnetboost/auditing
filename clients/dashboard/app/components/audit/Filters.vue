@@ -71,15 +71,21 @@ const active = computed(() =>
 </script>
 
 <template>
-  <div class="space-y-3">
-    <div class="flex flex-wrap items-end gap-3">
-      <UFormField label="Entity" class="w-56">
+  <UCard :ui="{ body: 'space-y-3' }">
+    <!--
+      A 12-column grid rather than a row of boxes with hand-picked widths: the controls then share
+      edges at every width instead of reflowing into a ragged stack, and each one is as wide as its
+      content needs — an entity name is long, a key is short.
+    -->
+    <div class="grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-12">
+      <UFormField label="Entity" class="lg:col-span-4">
         <USelect
           v-if="haveEntities"
           v-model="entityName"
           :items="entityItems"
           value-key="value"
           icon="i-lucide-box"
+          class="w-full"
         />
         <!--
           No inventory to offer: the application declared no entities, or discovery is off. That is
@@ -90,61 +96,83 @@ const active = computed(() =>
           v-model="filters.entityName"
           placeholder="Product"
           icon="i-lucide-box"
+          class="w-full"
         />
       </UFormField>
 
-      <UFormField label="Key" class="w-28">
-        <UInput v-model="filters.entityId" placeholder="42" />
+      <UFormField label="Key" class="lg:col-span-2">
+        <UInput v-model="filters.entityId" placeholder="42" class="w-full" />
       </UFormField>
 
-      <UFormField label="Action" class="w-40">
-        <USelect v-model="action" :items="actions" value-key="value" />
+      <UFormField label="Action" class="lg:col-span-2">
+        <USelect
+          v-model="action"
+          :items="actions"
+          value-key="value"
+          class="w-full"
+        />
       </UFormField>
 
-      <UFormField label="Actor" class="w-56">
+      <UFormField label="Actor" class="lg:col-span-4">
         <UInput
           v-model="filters.actor"
           :disabled="filters.actorMissing"
           placeholder="alice@example.com"
           icon="i-lucide-user"
+          class="w-full"
         />
       </UFormField>
 
-      <UFormField label="From" class="w-44">
-        <UInput v-model="filters.from" type="datetime-local" />
+      <UFormField label="Period" class="lg:col-span-4">
+        <AuditDateRange v-model:from="filters.from" v-model:to="filters.to" />
       </UFormField>
 
-      <UFormField label="To" class="w-44">
-        <UInput v-model="filters.to" type="datetime-local" />
-      </UFormField>
-
-      <UButton
-        v-if="active"
-        icon="i-lucide-x"
-        color="neutral"
-        variant="ghost"
-        :loading="loading"
-        @click="emit('reset')"
+      <div
+        class="sm:col-span-2 lg:col-span-8 flex flex-wrap items-center justify-between gap-3 lg:self-end lg:pb-1"
       >
-        Clear {{ active }}
-      </UButton>
-    </div>
+        <!--
+          A separate control, not "leave the actor box empty". The API treats a blank `actor` as no
+          filter at all, so "entries nobody is recorded for" needs a question of its own — and those
+          entries are real: a background job, a migration, a webhook.
+        -->
+        <UCheckbox
+          v-model="filters.actorMissing"
+          label="Only entries with no actor recorded"
+          :ui="{ label: 'text-sm' }"
+        />
 
-    <div class="flex items-center gap-4">
-      <!--
-        A separate control, not "leave the actor box empty". The API treats a blank `actor` as no
-        filter at all, so "entries nobody is recorded for" needs a question of its own — and those
-        entries are real: a background job, a migration, a webhook.
-      -->
-      <UCheckbox
-        v-model="filters.actorMissing"
-        label="Only entries with no actor recorded"
-        :ui="{ label: 'text-sm' }"
-      />
+        <div class="flex items-center gap-2">
+          <!--
+            Followed from an entry's detail panel, which links the other halves of one edit. It
+            narrows the trail more than anything else here and has no box of its own, so without
+            this chip the page would be showing one correlation with nothing on screen saying so.
+          -->
+          <UTooltip v-if="filters.correlationId" :text="filters.correlationId">
+            <UButton
+              icon="i-lucide-link"
+              trailing-icon="i-lucide-x"
+              color="neutral"
+              variant="subtle"
+              size="sm"
+              @click="filters.correlationId = undefined"
+            >
+              One edit · {{ shortId(filters.correlationId) }}
+            </UButton>
+          </UTooltip>
 
-      <p class="text-xs text-muted">
-        A window includes its start and excludes its end, so consecutive ranges never double-count.
-      </p>
+          <UButton
+            v-if="active"
+            icon="i-lucide-filter-x"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            :loading="loading"
+            @click="emit('reset')"
+          >
+            Clear {{ active }}
+          </UButton>
+        </div>
+      </div>
     </div>
 
     <div v-if="notAudited" class="flex items-start gap-2 text-xs text-warning">
@@ -155,5 +183,5 @@ const active = computed(() =>
         Entries from before that are still here; nothing new will arrive.
       </p>
     </div>
-  </div>
+  </UCard>
 </template>

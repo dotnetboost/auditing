@@ -56,7 +56,7 @@ browser would let anyone with the page read the whole trail.
 API free of CORS configuration. A real dashboard forwards the signed-in user's own token from that
 same handler.
 
-## Four things the UI is careful about
+## Five things the UI is careful about
 
 Each is a way a trail viewer can quietly mislead:
 
@@ -70,3 +70,7 @@ Each is a way a trail viewer can quietly mislead:
   than claiming the end of the trail.
 - **The page-size selector stops at the API's `MaxPageSize`**, because a larger page would only be
   clamped by the engine.
+- **A window excludes its end, and the picker says so.** `to` is exclusive so consecutive ranges
+  never double-count, which means a day picked as the end of a range is sent as the midnight
+  *after* it — otherwise choosing the 9th would hide everything that happened on the 9th. The
+  period button shows the window the way it was picked, the inclusive last day, not that instant.
