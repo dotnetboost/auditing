@@ -12,7 +12,7 @@ No Aspire CLI is required: `AspireUseCliBundle` resolves the orchestrator and da
 
 | Resource | |
 |---|---|
-| `postgres` | PostgreSQL 16 with pgAdmin, on a **named volume** — a trail that vanished when the container stopped would demonstrate the opposite of the point |
+| `postgres` | PostgreSQL 16 with pgweb, on a **named volume** — a trail that vanished when the container stopped would demonstrate the opposite of the point |
 | `auditing` | The database holding the sample's tables **and** the trail |
 | `api` | `samples/SampleApp`, with a health check |
 | `dashboard` | `clients/dashboard` (Nuxt), with `npm install` run for you |

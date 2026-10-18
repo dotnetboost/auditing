@@ -33,7 +33,7 @@ var postgres = builder.AddPostgres("postgres")
     // Named volume, so a trail collected in one session is still there in the next. An audit trail
     // that vanished when the container stopped would demonstrate the opposite of the point.
     .WithDataVolume("dotnetboost-auditing-pgdata")
-    .WithPgAdmin();
+    .WithPgWeb();
 
 var database = postgres.AddDatabase("auditing");
 
