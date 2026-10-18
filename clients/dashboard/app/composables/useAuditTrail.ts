@@ -9,7 +9,13 @@ import type { AuditFilters, AuditPage } from '~/types'
  * those apart or it will claim an empty trail.
  */
 export function useAuditTrail() {
-  const { maxPageSize } = useRuntimeConfig().public
+  const configured = useRuntimeConfig().public.maxPageSize
+  const { maxPageSize: published } = useAuditEntities()
+
+  // The API publishes its own bound, so the dashboard asks rather than holds a copy. The
+  // configured number stays as the fallback for the moment before the API has answered, and for an
+  // API with discovery turned off — not as a second source of truth.
+  const maxPageSize = computed(() => published.value || configured)
 
   const filters = ref<AuditFilters>({})
   const page = ref(1)
@@ -19,7 +25,7 @@ export function useAuditTrail() {
   const query = computed(() => {
     const q: Record<string, string> = {
       skip: String((page.value - 1) * pageSize.value),
-      take: String(Math.min(pageSize.value, maxPageSize)),
+      take: String(Math.min(pageSize.value, maxPageSize.value)),
       includeTotal: String(includeTotal.value)
     }
 

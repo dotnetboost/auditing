@@ -36,6 +36,10 @@ It is also the answer to the two questions a trail provokes and cannot answer it
 property never here?* and *why does this one arrive with no values?* — which otherwise take a trip
 through the source.
 
+The same response carries `maxPageSize`, so the page-size selector offers what the engine will
+actually serve instead of a number kept in step by hand. `NUXT_PUBLIC_MAX_PAGE_SIZE` survives as
+the fallback for the moment before the API answers, and for an API with discovery turned off.
+
 Both endpoints can be absent: an application that declares no entities has no inventory to publish,
 and `MapDiscovery = false` turns them off outright. The filter falls back to a text box, which is
 what it was before. An empty list is never rendered as "nothing is audited", because it does not

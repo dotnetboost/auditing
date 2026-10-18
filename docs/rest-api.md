@@ -82,7 +82,7 @@ GET /api/audit?correlationId=00-7c1f…-01          # the other halves of one ed
 | `actorMissing` | Only entries whose actor was never captured. `actor=` cannot ask this |
 | `correlationId` | The other entries of the same edit |
 | `from`, `to` | UTC. `from` is inclusive, `to` is **exclusive**, so consecutive windows do not double-count |
-| `skip`, `take` | `take` is clamped; omitting it gives the configured default, never everything |
+| `skip`, `take` | `take` is clamped to `maxPageSize` (which `GET /api/audit/entities` publishes); omitting it gives the configured default, never everything |
 | `includeTotal` | Count the matches as well. Off by default: it is a second pass over the index |
 | `includeChanges` | On by default. Turn it off for a wide window, where property rows outnumber entries |
 
@@ -136,12 +136,20 @@ GET /api/audit/entities
 ```
 
 ```json
-[
-  { "name": "Invoice", "clrType": "InvoiceRecord", "audited": true,  "optedIn": false, "ignored": false, "retentionDays": 30,   "hasOwnRetention": true  },
-  { "name": "Product", "clrType": "Product",       "audited": true,  "optedIn": false, "ignored": false, "retentionDays": 365,  "hasOwnRetention": false },
-  { "name": "SessionPing", "clrType": "SessionPing", "audited": false, "optedIn": false, "ignored": true, "retentionDays": null, "hasOwnRetention": false }
-]
+{
+  "maxPageSize": 200,
+  "entities": [
+    { "name": "Invoice", "clrType": "InvoiceRecord", "audited": true,  "optedIn": false, "ignored": false, "retentionDays": 30,   "hasOwnRetention": true  },
+    { "name": "Product", "clrType": "Product",       "audited": true,  "optedIn": false, "ignored": false, "retentionDays": 365,  "hasOwnRetention": false },
+    { "name": "SessionPing", "clrType": "SessionPing", "audited": false, "optedIn": false, "ignored": true, "retentionDays": null, "hasOwnRetention": false }
+  ]
+}
 ```
+
+- `maxPageSize` is `AuditingOptions.MaxPageSize`: the largest page a read may ask for. Asking for
+  more is not refused, it is clamped, and a page's `take` reports what was actually served — this
+  is how a client knows not to ask in the first place. It is published because the alternative is
+  every client holding its own copy of a server-side limit, kept in step by hand.
 
 - `name` is the **stored** name — what `[AuditEntity("…")]` set, which is what `entityName` filters
   on and not necessarily the class name.

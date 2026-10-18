@@ -1,4 +1,25 @@
+using DotNetBoost.Auditing.Core;
+
 namespace DotNetBoost.Auditing.API;
+
+/// <summary>
+/// The body of <c>GET {prefix}/entities</c>: the declared entities, and the bound every read of
+/// the trail is subject to.
+/// </summary>
+/// <param name="MaxPageSize">
+/// The largest page a read may ask for — <see cref="AuditingOptions.MaxPageSize"/>. A client that
+/// asks for more is not refused, it is clamped, and <c>take</c> in the response reports what it
+/// actually got; this is how it can stop asking in the first place.
+/// <para>
+/// Published here because the alternative is every client hard-coding a number that has to be
+/// kept in step with the server's by hand — and a limit a client has to be told out of band is a
+/// limit it will eventually have wrong.
+/// </para>
+/// </param>
+/// <param name="Entities">The declared entities, by stored name.</param>
+public sealed record AuditEntitiesResponse(
+    int MaxPageSize,
+    IReadOnlyList<AuditEntityDescriptor> Entities);
 
 /// <summary>One declared entity, as <c>GET {prefix}/entities</c> lists it.</summary>
 /// <param name="Name">

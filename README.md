@@ -33,7 +33,7 @@ Works with **.NET 8 and .NET 10**. `DotNetBoost.Auditing.Core` has **one** NuGet
 `Microsoft.Extensions.DependencyInjection.Abstractions` — and no dependency on any other
 DotNetBoost package.
 
-> **Status:** in development. All five packages are built and tested — **365 tests** needing nothing
+> **Status:** in development. All five packages are built and tested — **367 tests** needing nothing
 > installed, on both target frameworks, plus **168 integration tests** against **PostgreSQL 16, SQL
 > Server 2022 and MongoDB 7** in containers, including the atomicity guarantee below. One contract
 > suite is run against every store, the in-memory double included; see

@@ -33,7 +33,12 @@ const select = (entry: AuditEntry) => {
   open.value = true
 }
 
-const sizes = [10, 25, 50, 100, 200].filter(n => n <= maxPageSize).map(n => ({ label: `${n} per page`, value: n }))
+// Computed, because the bound arrives from the API: a list built once at setup would offer page
+// sizes the engine would only clamp.
+const sizes = computed(() =>
+  [10, 25, 50, 100, 200]
+    .filter(n => n <= maxPageSize.value)
+    .map(n => ({ label: `${n} per page`, value: n })))
 
 const loading = computed(() => status.value === 'pending')
 

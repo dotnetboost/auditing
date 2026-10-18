@@ -18,13 +18,16 @@ public class DiscoveryEndpointTests
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    private static async Task<List<AuditEntityDescriptor>> EntitiesAsync(ApiHarness api, string? scope = null)
+    private static async Task<AuditEntitiesResponse> ListAsync(ApiHarness api, string? scope = null)
     {
         var response = await api.GetAsync("/api/audit/entities", scope: scope);
         response.EnsureSuccessStatusCode();
 
-        return (await response.Content.ReadFromJsonAsync<List<AuditEntityDescriptor>>(Json))!;
+        return (await response.Content.ReadFromJsonAsync<AuditEntitiesResponse>(Json))!;
     }
+
+    private static async Task<IReadOnlyList<AuditEntityDescriptor>> EntitiesAsync(ApiHarness api, string? scope = null) =>
+        (await ListAsync(api, scope)).Entities;
 
     private static async Task<AuditEntitySchema> SchemaAsync(ApiHarness api, string entityName)
     {
@@ -91,6 +94,40 @@ public class DiscoveryEndpointTests
         var entities = await EntitiesAsync(api);
 
         Assert.All(entities, e => Assert.False(e.Audited));
+    }
+
+    [Fact]
+    public async Task The_list_publishes_the_page_bound_every_read_is_clamped_to()
+    {
+        await using var api = await ApiHarness.StartAsync(options: o => o.MaxPageSize = 75);
+
+        // Without this a client hard-codes the number and keeps it in step with the server's by
+        // hand — which is a limit it will eventually have wrong.
+        Assert.Equal(75, (await ListAsync(api)).MaxPageSize);
+    }
+
+    [Fact]
+    public async Task The_page_bound_is_the_one_the_reads_actually_enforce()
+    {
+        // Max first, then the default: Validate() refuses a default page larger than the maximum.
+        await using var api = await ApiHarness.StartAsync(options: o =>
+        {
+            o.MaxPageSize     = 2;
+            o.DefaultPageSize = 2;
+        });
+        await api.CreateProductAsync();
+        await api.CreateProductAsync();
+        await api.CreateProductAsync();
+
+        var bound = (await ListAsync(api)).MaxPageSize;
+
+        // Asked for more than the bound; the engine clamps and the page says what it served. The
+        // two numbers have to be the same one, or publishing it would be worse than not.
+        var page = await api.GetAsync($"/api/audit?take={bound + 10}");
+        var body = await page.Content.ReadFromJsonAsync<AuditPageResponse>(Json);
+
+        Assert.Equal(2, bound);
+        Assert.Equal(bound, body!.Take);
     }
 
     [Fact]

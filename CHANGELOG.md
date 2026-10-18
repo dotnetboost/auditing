@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 365 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 367 tests on net8.0 and
 net10.0 needing nothing installed, plus 168 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -99,9 +99,13 @@ MongoDB in containers.
     differently — can only be learned by waiting for a change to one of them. `audited` is asked of
     the engine per request rather than worked out from the attributes, so the kill switch and
     opt-in mode show up as an entity that is not audited instead of as an unexplained empty trail.
-  - The dashboard uses both: the entity filter is a list of the declared entities rather than a
-    text box, and a filtered trail shows that entity's properties with their rules beside it. None
-    of it is written out in the client, so it cannot drift from the attributes.
+  - The entity list also publishes **`maxPageSize`**, the bound every read is clamped to. A limit
+    a client has to be told out of band is one it eventually has wrong, and the dashboard held its
+    own copy of this number until now.
+  - The dashboard uses all of it: the entity filter is a list of the declared entities rather than
+    a text box, a filtered trail shows that entity's properties with their rules beside it, and the
+    page-size selector offers what the engine will actually serve. None of it is written out in the
+    client, so it cannot drift from the server.
   - `UseHttpContextActor()` records the request's `NameIdentifier` claim, preferring it to the
     display name: a name can be changed by the person it names, which is the wrong key for a record
     of who acted. Outside a request, or unauthenticated, the actor stays honestly `null`.

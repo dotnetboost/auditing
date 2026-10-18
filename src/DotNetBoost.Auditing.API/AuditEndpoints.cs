@@ -335,44 +335,43 @@ namespace DotNetBoost.Auditing.API
         /// to have seen.
         /// </summary>
         /// <remarks>
-        /// The static half is read once here rather than per request: the declared entities and
-        /// their attributes cannot change while the application runs. Whether an entity is
-        /// <i>currently</i> audited is asked of the engine per request, because the kill switch is
-        /// an option a host can hold differently from the one this method saw.
+        /// Only what cannot change is read once here: the declared entities and the attributes on
+        /// them, which are fixed for the life of the process. Everything the <b>options</b> decide
+        /// — the page bound, the fallback retention, whether an entity is audited at all — is
+        /// resolved per request, so the answer describes the engine as it is now rather than as it
+        /// was when the routes were mapped.
         /// </remarks>
         private static void RegisterDiscovery(RouteGroupBuilder group, IServiceProvider services)
         {
             var registry = services.GetRequiredService<AuditModelRegistry>();
-            var fallback = services.GetRequiredService<AuditingOptions>().Retention;
 
             var declared = registry.EntityTypes
-                .Select(pair => Describe(pair.Key, pair.Value, fallback))
+                .Select(pair => DeclaredEntity.From(pair.Key, pair.Value))
                 .OrderBy(e => e.Name, StringComparer.Ordinal)
                 .ToList();
 
             var byName = declared.ToDictionary(e => e.Name, StringComparer.Ordinal);
 
-            group.MapGet("/entities", (IAuditRecorder recorder) =>
-                TypedResults.Ok<IReadOnlyList<AuditEntityDescriptor>>(
-                    [.. declared.Select(e => e with { Audited = IsAudited(recorder, registry, e.Name) })]))
+            group.MapGet("/entities", (IAuditRecorder recorder, AuditingOptions options) =>
+                TypedResults.Ok(new AuditEntitiesResponse(
+                    MaxPageSize: options.MaxPageSize,
+                    Entities:    [.. declared.Select(e => e.Describe(recorder, options))])))
                 .WithName("ListAuditEntities")
-                .WithSummary("The declared entities. Returns nothing recorded.")
-                .Produces<IReadOnlyList<AuditEntityDescriptor>>();
+                .WithSummary("The declared entities and the page bound. Returns nothing recorded.")
+                .Produces<AuditEntitiesResponse>();
 
             group.MapGet("/entities/{entityName}", Results<Ok<AuditEntitySchema>, NotFound> (
                 IAuditRecorder recorder,
+                AuditingOptions options,
                 string entityName) =>
             {
                 // 404 rather than an empty description: an entity nothing was declared for has no
                 // properties the engine knows about, and answering with an empty list would read
                 // as "declared, and has no properties", which is a different and wrong thing.
-                if (!byName.TryGetValue(entityName, out var entity)
-                    || !registry.EntityTypes.TryGetValue(entityName, out var type))
-                {
+                if (!byName.TryGetValue(entityName, out var entity))
                     return TypedResults.NotFound();
-                }
 
-                var properties = AuditSchema.Describe(type)
+                var properties = AuditSchema.Describe(entity.Type)
                     .Select(p => new AuditPropertyDescriptor(
                         Name:     p.Name,
                         Type:     p.ClrType,
@@ -380,12 +379,14 @@ namespace DotNetBoost.Auditing.API
                         Rule:     p.Rule.ToString()))
                     .ToList();
 
+                var described = entity.Describe(recorder, options);
+
                 return TypedResults.Ok(new AuditEntitySchema(
-                    Name:            entity.Name,
-                    ClrType:         entity.ClrType,
-                    Audited:         IsAudited(recorder, registry, entity.Name),
-                    RetentionDays:   entity.RetentionDays,
-                    HasOwnRetention: entity.HasOwnRetention,
+                    Name:            described.Name,
+                    ClrType:         described.ClrType,
+                    Audited:         described.Audited,
+                    RetentionDays:   described.RetentionDays,
+                    HasOwnRetention: described.HasOwnRetention,
                     Properties:      properties));
             })
             .WithName("DescribeAuditEntity")
@@ -395,31 +396,39 @@ namespace DotNetBoost.Auditing.API
         }
 
         /// <summary>
-        /// The static facts about one declared entity. <c>Audited</c> is left <c>false</c> here and
-        /// filled in per request — see <see cref="RegisterDiscovery"/>.
+        /// One declared entity's fixed facts, read at map time. Everything configuration has a say
+        /// in is left to <see cref="Describe"/>.
         /// </summary>
-        private static AuditEntityDescriptor Describe(string name, Type type, TimeSpan? fallback)
+        private sealed record DeclaredEntity(
+            string Name,
+            Type Type,
+            bool OptedIn,
+            bool Ignored,
+            TimeSpan? OwnRetention)
         {
-            var plan = AuditPlan.For(type);
-            var own  = plan.Retention;
+            public static DeclaredEntity From(string name, Type type)
+            {
+                var plan = AuditPlan.For(type);
+                return new DeclaredEntity(name, type, plan.OptedIn, plan.Ignored, plan.Retention);
+            }
 
-            return new AuditEntityDescriptor(
-                Name:            name,
-                ClrType:         type.Name,
-                Audited:         false,
-                OptedIn:         plan.OptedIn,
-                Ignored:         plan.Ignored,
-                RetentionDays:   (own ?? fallback)?.TotalDays,
-                HasOwnRetention: own is not null);
+            /// <summary>
+            /// The entity as it stands now.
+            /// <para>
+            /// <c>Audited</c> is asked of <see cref="IAuditRecorder"/> rather than worked out from
+            /// the attributes here, so that one definition of "audited" serves both the recorder
+            /// and anything reading this endpoint.
+            /// </para>
+            /// </summary>
+            public AuditEntityDescriptor Describe(IAuditRecorder recorder, AuditingOptions options) =>
+                new(Name:            Name,
+                    ClrType:         Type.Name,
+                    Audited:         recorder.IsAudited(Type),
+                    OptedIn:         OptedIn,
+                    Ignored:         Ignored,
+                    RetentionDays:   (OwnRetention ?? options.Retention)?.TotalDays,
+                    HasOwnRetention: OwnRetention is not null);
         }
-
-        /// <summary>
-        /// Whether the engine would record a change to this entity now. Asked of
-        /// <see cref="IAuditRecorder"/> rather than worked out from the attributes, so that one
-        /// definition of "audited" serves both the recorder and anything reading this endpoint.
-        /// </summary>
-        private static bool IsAudited(IAuditRecorder recorder, AuditModelRegistry registry, string entityName) =>
-            registry.EntityTypes.TryGetValue(entityName, out var type) && recorder.IsAudited(type);
 
         /// <summary>
         /// A sub-group for the endpoints that delete, so a stricter policy can cover them without

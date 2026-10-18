@@ -33,8 +33,9 @@ export default defineNuxtConfig({
       // Override with NUXT_PUBLIC_API_REFERENCE_URL.
       apiReferenceUrl: 'http://localhost:5280/scalar',
 
-      // AuditingOptions.MaxPageSize on the API. The trail browser will not ask for a page the
-      // engine would only clamp, so the page-size selector stops here.
+      // FALLBACK for AuditingOptions.MaxPageSize. The API publishes its own bound in
+      // GET /api/audit/entities and the trail browser uses that; this is what it falls back to
+      // before the API has answered, and for an API with discovery turned off.
       // Override with NUXT_PUBLIC_MAX_PAGE_SIZE.
       maxPageSize: 200
     }

@@ -37,6 +37,16 @@ export interface AuditPage {
   take: number
 }
 
+/** `AuditEntitiesResponse` from DotNetBoost.Auditing.API — the body of `GET /api/audit/entities`. */
+export interface AuditEntitiesResponse {
+  /**
+   * The largest page a read may ask for. Published by the API so a client does not hold its own
+   * copy of a server-side limit — a limit told out of band is one a client eventually has wrong.
+   */
+  maxPageSize: number
+  entities: AuditEntityDescriptor[]
+}
+
 /** `AuditEntityDescriptor` from DotNetBoost.Auditing.API — `GET /api/audit/entities`. */
 export interface AuditEntityDescriptor {
   /**

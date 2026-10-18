@@ -1,4 +1,4 @@
-import type { AuditEntityDescriptor } from '~/types'
+import type { AuditEntitiesResponse } from '~/types'
 
 /**
  * Reads `GET /api/audit/entities` — which entities the engine knows about.
@@ -14,18 +14,23 @@ import type { AuditEntityDescriptor } from '~/types'
  * asking the user to type a name rather than presenting an empty list as the truth.
  */
 export function useAuditEntities() {
-  const { data, status, error } = useFetch<AuditEntityDescriptor[]>('/api/audit/entities', {
+  const { data, status, error } = useFetch<AuditEntitiesResponse>('/api/audit/entities', {
     key: 'audit-entities',
-    default: () => [],
+    default: () => ({ maxPageSize: 0, entities: [] }),
     // A 404 is "discovery is off", which is a configuration, not a failure to report. The list
     // stays empty and the callers' fallback does the rest.
     getCachedData: (key, nuxtApp) => nuxtApp.payload.data[key] ?? nuxtApp.static.data[key]
   })
 
-  const entities = computed(() => data.value ?? [])
+  const entities = computed(() => data.value?.entities ?? [])
 
   return {
     entities,
+    /**
+     * The API's own page bound, or 0 before it has answered — and 0 when discovery is off, which
+     * is why callers fall back to the configured one rather than clamping to nothing.
+     */
+    maxPageSize: computed(() => data.value?.maxPageSize ?? 0),
     /** Whether there is an inventory to offer. False when nothing is declared or discovery is off. */
     available: computed(() => entities.value.length > 0),
     byName: computed(() => new Map(entities.value.map(e => [e.name, e]))),

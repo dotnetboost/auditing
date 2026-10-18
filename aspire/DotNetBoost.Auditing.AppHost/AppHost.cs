@@ -73,8 +73,9 @@ builder.AddJavaScriptApp("dashboard", "../../clients/dashboard", "dev")
     // The sidebar's "API reference" link. Read in the browser, so it needs the public URL.
     .WithEnvironment("NUXT_PUBLIC_API_REFERENCE_URL",
         ReferenceExpression.Create($"{api.GetEndpoint("http")}/scalar"))
-    // Must match AuditingOptions.MaxPageSize in samples/SampleApp/Program.cs: the trail browser
-    // will not ask for a page the engine would only clamp.
+    // Only a fallback: the API publishes AuditingOptions.MaxPageSize in GET /api/audit/entities
+    // and the dashboard reads it from there, so this is what it uses before the first answer
+    // arrives — or if discovery is turned off.
     .WithEnvironment("NUXT_PUBLIC_MAX_PAGE_SIZE", "200")
     .WithExternalHttpEndpoints();
 
