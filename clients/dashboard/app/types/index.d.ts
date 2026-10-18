@@ -37,6 +37,53 @@ export interface AuditPage {
   take: number
 }
 
+/** `AuditEntityDescriptor` from DotNetBoost.Auditing.API — `GET /api/audit/entities`. */
+export interface AuditEntityDescriptor {
+  /**
+   * The name entries are STORED under, which is what `entityName` filters on. Not necessarily the
+   * class name: `[AuditEntity("…")]` sets it.
+   */
+  name: string
+  clrType: string
+  /**
+   * Whether a change to it would be recorded right now. The API asks its own engine, so this also
+   * accounts for the kill switch and for opt-in mode — `false` with `ignored: false` is how an
+   * operator finds out one of those is on, rather than by wondering why a trail is empty.
+   */
+  audited: boolean
+  optedIn: boolean
+  /** `[AuditIgnore]` on the class: never recorded, whatever else is configured. */
+  ignored: boolean
+  /**
+   * The effective retention in days, own or configured. `null` means NOTHING is configured, so a
+   * prune leaves the entries alone — never that they expire at once.
+   */
+  retentionDays: number | null
+  /** Whether `retentionDays` is the entity's own rather than the configured default. */
+  hasOwnRetention: boolean
+}
+
+/** `AuditPropertyDescriptor` from DotNetBoost.Auditing.API. */
+export interface AuditPropertyDescriptor {
+  /** As named on the class — the same spelling a recorded change uses for `propertyName`. */
+  name: string
+  type: string
+  nullable: boolean
+  /** `Record`, `Redact` or `Ignore` — a name, not a number, like `action`. */
+  rule: 'Record' | 'Redact' | 'Ignore'
+}
+
+/** `AuditEntitySchema` from DotNetBoost.Auditing.API — `GET /api/audit/entities/{entityName}`. */
+export interface AuditEntitySchema {
+  name: string
+  clrType: string
+  audited: boolean
+  retentionDays: number | null
+  hasOwnRetention: boolean
+  /** Every public property, the ignored ones included — listed AS ignored rather than omitted. */
+  properties: AuditPropertyDescriptor[]
+}
+
 /** The filters `GET /api/audit` accepts. */
 export interface AuditFilters {
   entityName?: string

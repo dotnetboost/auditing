@@ -21,6 +21,7 @@ await db.SaveChangesAsync();   // the audit rows are written in this same transa
 GET /api/audit?entityName=Product&entityId=42        -> that product's history, newest first, paged
 GET /api/audit/{id}                                   -> one entry with its property changes
 GET /api/audit?actor=alice@example.com&from=2026-10-01
+GET /api/audit/entities                               -> which entities are audited, and what is not
 ```
 
 ---

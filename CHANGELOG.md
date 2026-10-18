@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 345 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 365 tests on net8.0 and
 net10.0 needing nothing installed, plus 168 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -17,6 +17,9 @@ MongoDB in containers.
   - `AuditEntry` + `AuditPropertyChange`: two tables, one row per property that changed, no
     foreign key to the application's own tables.
   - `[AuditEntity]`, `[Audited]`, `[AuditIgnore]`, `[AuditRedact]`, `[AuditRetention]`.
+  - `AuditSchema.Describe(type)` — the properties of an audited entity and their rules, read from
+    `AuditPlan` and cached per type. The rule for *which* properties count lives there too, so a
+    description and the recorder cannot drift apart.
   - **DotNetBoost Entity Addressing v1**, implemented independently and asserted by the test
     suite. `EntityKey.AddressingVersion` is published for a consumer to compare with
     `DotNetBoost.Media`'s and `DotNetBoost.MultiLingual`'s.
@@ -87,6 +90,18 @@ MongoDB in containers.
   - **The erasure and prune endpoints are not mapped at all** unless asked for — absent rather than
     merely secured. `DestructivePolicy` is required on top of `Policy` rather than instead of it, so
     it is impossible to configure a destructive endpoint that is easier to reach than the reads.
+  - **Discovery endpoints.** `GET /api/audit/entities` lists the declared entities and
+    `GET /api/audit/entities/{entityName}` describes one entity's properties and the rule each
+    falls under — `Record`, `Redact` or `Ignore`. Neither returns anything recorded, both sit
+    inside the read group so the same authorization covers them, and `MapDiscovery = false` turns
+    them off. Without them a client filtering by `entityName` is filtering by a name somebody typed
+    out of the source, and which properties are redacted — the one thing a UI has to render
+    differently — can only be learned by waiting for a change to one of them. `audited` is asked of
+    the engine per request rather than worked out from the attributes, so the kill switch and
+    opt-in mode show up as an entity that is not audited instead of as an unexplained empty trail.
+  - The dashboard uses both: the entity filter is a list of the declared entities rather than a
+    text box, and a filtered trail shows that entity's properties with their rules beside it. None
+    of it is written out in the client, so it cannot drift from the attributes.
   - `UseHttpContextActor()` records the request's `NameIdentifier` claim, preferring it to the
     display name: a name can be changed by the person it names, which is the wrong key for a record
     of who acted. Outside a request, or unauthenticated, the actor stays honestly `null`.

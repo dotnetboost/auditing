@@ -1,9 +1,12 @@
+using DotNetBoost.Auditing.Core;
 using DotNetBoost.Auditing.Core.Interfaces;
+using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Models;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DotNetBoost.Auditing.API
 {
@@ -193,6 +196,20 @@ namespace DotNetBoost.Auditing.API
         public bool MapPrune { get; set; }
 
         /// <summary>
+        /// Whether to map the discovery endpoints — <c>GET {prefix}/entities</c> listing the
+        /// declared entities and <c>GET {prefix}/entities/{entityName}</c> describing one entity's
+        /// properties. <b>Default <c>true</c>.</b>
+        /// <para>
+        /// Neither returns anything recorded. They are mapped inside the read group, so they are
+        /// covered by <see cref="RequireAuthorization"/> and <see cref="Policy"/> like the reads —
+        /// and what they disclose, entity and property names, is already all over the entries that
+        /// same caller may read. Turn it off if you would rather not publish the inventory, for
+        /// instance where the endpoints are mapped anonymously.
+        /// </para>
+        /// </summary>
+        public bool MapDiscovery { get; set; } = true;
+
+        /// <summary>
         /// An <b>additional</b> policy for the erasure and prune endpoints, when they are mapped —
         /// reading a trail and destroying one are different privileges.
         /// <para>
@@ -222,6 +239,8 @@ namespace DotNetBoost.Auditing.API
         /// <list type="bullet">
         /// <item><description><c>GET {prefix}</c> — a filtered, paged page of the trail, newest first.</description></item>
         /// <item><description><c>GET {prefix}/{id}</c> — one entry with its property changes.</description></item>
+        /// <item><description><c>GET {prefix}/entities</c> — the declared entities. No entries.</description></item>
+        /// <item><description><c>GET {prefix}/entities/{entityName}</c> — one entity's properties and their rules.</description></item>
         /// <item><description><c>DELETE {prefix}/entity/{entityName}/{entityId}</c> — erase one entity's trail. Opt-in.</description></item>
         /// <item><description><c>DELETE {prefix}/actor/{actor}</c> — erase one actor's entries. Opt-in.</description></item>
         /// <item><description><c>POST {prefix}/prune</c> — apply retention. Opt-in.</description></item>
@@ -282,6 +301,9 @@ namespace DotNetBoost.Auditing.API
                 .WithSummary("One entry with its property changes.")
                 .ProducesProblem(StatusCodes.Status404NotFound);
 
+            if (options.MapDiscovery)
+                RegisterDiscovery(group, endpoints.ServiceProvider);
+
             if (options.MapErasure)
             {
                 var erasure = Destructive(group, options);
@@ -305,6 +327,99 @@ namespace DotNetBoost.Auditing.API
 
             return group;
         }
+
+        /// <summary>
+        /// <c>GET {prefix}/entities</c> and <c>GET {prefix}/entities/{entityName}</c> — which
+        /// entities are declared and what the model says about their properties, so a client can
+        /// build a filter or render a trail from the model instead of from the entries it happens
+        /// to have seen.
+        /// </summary>
+        /// <remarks>
+        /// The static half is read once here rather than per request: the declared entities and
+        /// their attributes cannot change while the application runs. Whether an entity is
+        /// <i>currently</i> audited is asked of the engine per request, because the kill switch is
+        /// an option a host can hold differently from the one this method saw.
+        /// </remarks>
+        private static void RegisterDiscovery(RouteGroupBuilder group, IServiceProvider services)
+        {
+            var registry = services.GetRequiredService<AuditModelRegistry>();
+            var fallback = services.GetRequiredService<AuditingOptions>().Retention;
+
+            var declared = registry.EntityTypes
+                .Select(pair => Describe(pair.Key, pair.Value, fallback))
+                .OrderBy(e => e.Name, StringComparer.Ordinal)
+                .ToList();
+
+            var byName = declared.ToDictionary(e => e.Name, StringComparer.Ordinal);
+
+            group.MapGet("/entities", (IAuditRecorder recorder) =>
+                TypedResults.Ok<IReadOnlyList<AuditEntityDescriptor>>(
+                    [.. declared.Select(e => e with { Audited = IsAudited(recorder, registry, e.Name) })]))
+                .WithName("ListAuditEntities")
+                .WithSummary("The declared entities. Returns nothing recorded.")
+                .Produces<IReadOnlyList<AuditEntityDescriptor>>();
+
+            group.MapGet("/entities/{entityName}", Results<Ok<AuditEntitySchema>, NotFound> (
+                IAuditRecorder recorder,
+                string entityName) =>
+            {
+                // 404 rather than an empty description: an entity nothing was declared for has no
+                // properties the engine knows about, and answering with an empty list would read
+                // as "declared, and has no properties", which is a different and wrong thing.
+                if (!byName.TryGetValue(entityName, out var entity)
+                    || !registry.EntityTypes.TryGetValue(entityName, out var type))
+                {
+                    return TypedResults.NotFound();
+                }
+
+                var properties = AuditSchema.Describe(type)
+                    .Select(p => new AuditPropertyDescriptor(
+                        Name:     p.Name,
+                        Type:     p.ClrType,
+                        Nullable: p.IsNullable,
+                        Rule:     p.Rule.ToString()))
+                    .ToList();
+
+                return TypedResults.Ok(new AuditEntitySchema(
+                    Name:            entity.Name,
+                    ClrType:         entity.ClrType,
+                    Audited:         IsAudited(recorder, registry, entity.Name),
+                    RetentionDays:   entity.RetentionDays,
+                    HasOwnRetention: entity.HasOwnRetention,
+                    Properties:      properties));
+            })
+            .WithName("DescribeAuditEntity")
+            .WithSummary("One entity's properties and the rule each falls under. Returns nothing recorded.")
+            .Produces<AuditEntitySchema>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+        }
+
+        /// <summary>
+        /// The static facts about one declared entity. <c>Audited</c> is left <c>false</c> here and
+        /// filled in per request — see <see cref="RegisterDiscovery"/>.
+        /// </summary>
+        private static AuditEntityDescriptor Describe(string name, Type type, TimeSpan? fallback)
+        {
+            var plan = AuditPlan.For(type);
+            var own  = plan.Retention;
+
+            return new AuditEntityDescriptor(
+                Name:            name,
+                ClrType:         type.Name,
+                Audited:         false,
+                OptedIn:         plan.OptedIn,
+                Ignored:         plan.Ignored,
+                RetentionDays:   (own ?? fallback)?.TotalDays,
+                HasOwnRetention: own is not null);
+        }
+
+        /// <summary>
+        /// Whether the engine would record a change to this entity now. Asked of
+        /// <see cref="IAuditRecorder"/> rather than worked out from the attributes, so that one
+        /// definition of "audited" serves both the recorder and anything reading this endpoint.
+        /// </summary>
+        private static bool IsAudited(IAuditRecorder recorder, AuditModelRegistry registry, string entityName) =>
+            registry.EntityTypes.TryGetValue(entityName, out var type) && recorder.IsAudited(type);
 
         /// <summary>
         /// A sub-group for the endpoints that delete, so a stricter policy can cover them without

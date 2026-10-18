@@ -20,6 +20,8 @@ every entry's actor is honestly unknown.
 |---|---|---|
 | `GET` | `/api/audit` | A filtered, paged page of the trail, newest first |
 | `GET` | `/api/audit/{id}` | One entry with its property changes; `404` if there is none |
+| `GET` | `/api/audit/entities` | The declared entities. No entries |
+| `GET` | `/api/audit/entities/{entityName}` | One entity's properties and their rules. No entries |
 | `DELETE` | `/api/audit/entity/{entityName}/{entityId}` | Erase one entity's trail. **Opt-in** |
 | `DELETE` | `/api/audit/actor/{actor}` | Erase one actor's entries. **Opt-in** |
 | `POST` | `/api/audit/prune` | Apply retention. **Opt-in** |
@@ -121,6 +123,80 @@ The response reports the page it actually served:
   inside it, and an endpoint that started parsing it would be the first thing to break when an
   application put something else there.
 - `occurredAt` is UTC with a `Z`.
+
+## Discovery: which entities are audited
+
+Nothing else says which entities the engine knows about, so a client filtering by `entityName` is
+otherwise filtering by a name somebody typed out of the source — and which properties are redacted,
+the one thing a UI has to render differently, can only be learned by waiting for a change to one of
+them.
+
+```
+GET /api/audit/entities
+```
+
+```json
+[
+  { "name": "Invoice", "clrType": "InvoiceRecord", "audited": true,  "optedIn": false, "ignored": false, "retentionDays": 30,   "hasOwnRetention": true  },
+  { "name": "Product", "clrType": "Product",       "audited": true,  "optedIn": false, "ignored": false, "retentionDays": 365,  "hasOwnRetention": false },
+  { "name": "SessionPing", "clrType": "SessionPing", "audited": false, "optedIn": false, "ignored": true, "retentionDays": null, "hasOwnRetention": false }
+]
+```
+
+- `name` is the **stored** name — what `[AuditEntity("…")]` set, which is what `entityName` filters
+  on and not necessarily the class name.
+- `audited` is the engine's own answer, asked per request, so it accounts for the kill switch and
+  for opt-in mode as well as for `[AuditIgnore]`. An entity that is `false` with `ignored: false` is
+  usually how an operator discovers `RequireOptIn` is on — the alternative being to wonder why the
+  trail is empty.
+- `retentionDays` is the effective retention: the entity's own `[AuditRetention]` when it has one,
+  otherwise the configured default, which `hasOwnRetention` tells the two apart. **`null` means
+  nothing is configured**, so a prune leaves the entries alone — never that they expire at once.
+
+```
+GET /api/audit/entities/Product
+```
+
+```json
+{
+  "name": "Product",
+  "clrType": "Product",
+  "audited": true,
+  "retentionDays": null,
+  "hasOwnRetention": false,
+  "properties": [
+    { "name": "Id",             "type": "Int32",   "nullable": false, "rule": "Record" },
+    { "name": "Price",          "type": "Decimal", "nullable": false, "rule": "Record" },
+    { "name": "SupplierSecret", "type": "String",  "nullable": false, "rule": "Redact" },
+    { "name": "LastSeenAt",     "type": "DateTime","nullable": false, "rule": "Ignore" }
+  ]
+}
+```
+
+- `name` is the property **as named on the class**, which is exactly how `propertyName` is spelled
+  in a recorded change — so the two match up without guessing at a casing convention.
+- `rule` is a name, like `action` is, for the same reason. `Redact` is the one worth surfacing in a
+  UI: it is why a change to that property arrives with both values `null` and `isRedacted` set.
+- Ignored properties are **listed, as ignored** rather than omitted. "This property is deliberately
+  not in the trail" is the answer to a question somebody would otherwise go and read the source for.
+- An entity that was never declared is `404`, not an empty property list — the second would read as
+  "declared, and has no properties", which is a different and wrong thing. Declare entities with
+  `DeclareEntitiesFrom(assembly)` or `DeclareEntity<T>()`.
+
+**The list is the declared entities, not every class the interceptor might see.** An application
+that never called `DeclareEntitiesFrom(assembly)` or `DeclareEntity<T>()` gets `[]` here while its
+trail fills up perfectly well — the registry is what the engine can resolve a *name* back to a
+*type* with, and nothing else can answer what `[AuditRedact]` says about a name. Declaring is a
+line in `AddAuditing()`; it is also what a prune needs to honour a per-entity `[AuditRetention]`.
+
+Neither endpoint returns anything recorded, and a test asserts that against the whole body. They are
+mapped inside the read group, so `RequireAuthorization` and `Policy` cover them like the reads. Turn
+them off if you would rather not publish the inventory — worth doing if you mapped the endpoints
+anonymously:
+
+```csharp
+app.MapAuditEndpoints(o => o.MapDiscovery = false);
+```
 
 ## Status codes
 

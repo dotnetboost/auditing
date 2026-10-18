@@ -20,8 +20,26 @@ cd clients/dashboard && cp .env.example .env && npm install && npm run dev
 |---|---|
 | **Overview** | Counts per action, the newest entries, and a short note on what wrote them |
 | **Trail** | The browser: filter by entity, key, action, actor and window; page through; open an entry |
+| **Trail → the model** | What the API says about the filtered entity: every property with its rule, and how long entries are kept |
 | **Products** | The sample's own entity — create, change a price, delete |
 | **Products → one product** | Change the price, with that product's history beside it. It still answers after the product is deleted |
+
+## The model comes from the API, not from here
+
+The entity filter is a list, not a text box, and it is filled from `GET /api/audit/entities`. The
+properties shown beside a filtered trail — `SupplierCost` redacted, `ViewCount` ignored — come from
+`GET /api/audit/entities/{entityName}`. None of it is written out in the dashboard: these are facts
+about the application's classes, and a hand-written copy of them here would be wrong the first time
+somebody changed an attribute.
+
+It is also the answer to the two questions a trail provokes and cannot answer itself — *why is this
+property never here?* and *why does this one arrive with no values?* — which otherwise take a trip
+through the source.
+
+Both endpoints can be absent: an application that declares no entities has no inventory to publish,
+and `MapDiscovery = false` turns them off outright. The filter falls back to a text box, which is
+what it was before. An empty list is never rendered as "nothing is audited", because it does not
+mean that.
 
 ## The identity problem, and where it is solved
 

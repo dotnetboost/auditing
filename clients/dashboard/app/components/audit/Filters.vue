@@ -11,6 +11,47 @@ const emit = defineEmits<{ reset: [] }>()
 // below maps it back to an absent filter, which is what the API reads as no filter at all.
 const ANY = 'any'
 
+// Which entities the engine knows about, so the entity filter offers the names the trail is
+// actually addressed by instead of asking somebody to remember them. It can be empty — nothing
+// declared, or discovery turned off — and the box falls back to free text when it is.
+const { entities, available: haveEntities, byName } = useAuditEntities()
+
+const entityItems = computed(() => {
+  const items = [{ label: 'Any entity', value: ANY }]
+
+  for (const entity of entities.value) {
+    items.push({
+      // The stored name is what filters, so it is what the value is. The class name is shown
+      // beside it only where the two differ, which is the case [AuditEntity("…")] exists for.
+      label: entity.name === entity.clrType ? entity.name : `${entity.name} · ${entity.clrType}`,
+      value: entity.name
+    })
+  }
+
+  // A name arriving from a link — one entry's entity, an entity nobody declared — is kept as an
+  // option of its own. Dropping it would silently widen the filter the link asked for.
+  const current = filters.value.entityName
+  if (current && !items.some(item => item.value === current)) {
+    items.push({ label: `${current} (not declared)`, value: current })
+  }
+
+  return items
+})
+
+const entityName = computed({
+  get: () => filters.value.entityName || ANY,
+  set: (value) => {
+    filters.value.entityName = value === ANY ? undefined : value
+  }
+})
+
+// Worth saying out loud: a filter that is right and a trail that is empty look identical, and this
+// is the difference between "nothing has happened yet" and "nothing ever will".
+const notAudited = computed(() => {
+  const selected = filters.value.entityName ? byName.value.get(filters.value.entityName) : undefined
+  return selected && !selected.audited ? selected : undefined
+})
+
 const actions = [
   { label: 'Any action', value: ANY },
   { label: 'Created', value: 'Created' },
@@ -32,8 +73,24 @@ const active = computed(() =>
 <template>
   <div class="space-y-3">
     <div class="flex flex-wrap items-end gap-3">
-      <UFormField label="Entity" class="w-40">
-        <UInput v-model="filters.entityName" placeholder="Product" icon="i-lucide-box" />
+      <UFormField label="Entity" class="w-56">
+        <USelect
+          v-if="haveEntities"
+          v-model="entityName"
+          :items="entityItems"
+          value-key="value"
+          icon="i-lucide-box"
+        />
+        <!--
+          No inventory to offer: the application declared no entities, or discovery is off. That is
+          not "no entities are audited" — the trail is still there — so the box stays a box.
+        -->
+        <UInput
+          v-else
+          v-model="filters.entityName"
+          placeholder="Product"
+          icon="i-lucide-box"
+        />
       </UFormField>
 
       <UFormField label="Key" class="w-28">
@@ -87,6 +144,15 @@ const active = computed(() =>
 
       <p class="text-xs text-muted">
         A window includes its start and excludes its end, so consecutive ranges never double-count.
+      </p>
+    </div>
+
+    <div v-if="notAudited" class="flex items-start gap-2 text-xs text-warning">
+      <UIcon name="i-lucide-eye-off" class="size-4 shrink-0 mt-px" />
+      <p>
+        <strong>{{ notAudited.name }}</strong> is not being recorded
+        {{ notAudited.ignored ? 'because the class carries [AuditIgnore]' : 'under the current configuration' }}.
+        Entries from before that are still here; nothing new will arrive.
       </p>
     </div>
   </div>

@@ -67,6 +67,17 @@ const hasMore = computed(() =>
       <div class="space-y-4">
         <AuditFilters v-model="filters" :loading="loading" @reset="reset" />
 
+        <!--
+          Keyed by the name so a different entity remounts rather than relabelling the previous
+          one's properties. Renders nothing for an entity the API has no model for — an undeclared
+          name is a legitimate filter, just not one anything can describe.
+        -->
+        <AuditEntityModel
+          v-if="filters.entityName"
+          :key="filters.entityName"
+          :name="filters.entityName"
+        />
+
         <UAlert
           v-if="error"
           color="error"

@@ -23,6 +23,7 @@ await audit.For(product).UpdatedAsync(
 GET /api/audit?entityName=Product&entityId=42         -> that product's history, newest first
 GET /api/audit?actor=alice@example.com&from=2026-10-01
 GET /api/audit/{id}                                    -> one entry with its property changes
+GET /api/audit/entities                                -> which entities are audited, and what isn't
 ```
 
 The endpoints **require authorization by default** and the erasure and prune endpoints are not
@@ -32,7 +33,7 @@ Works with **.NET 8 and .NET 10**. `DotNetBoost.Auditing.Core` has **one** NuGet
 `Microsoft.Extensions.DependencyInjection.Abstractions` — and no dependency on any other
 DotNetBoost package.
 
-> **Status:** in development. All five packages are built and tested — **345 tests** needing nothing
+> **Status:** in development. All five packages are built and tested — **365 tests** needing nothing
 > installed, on both target frameworks, plus **168 integration tests** against **PostgreSQL 16, SQL
 > Server 2022 and MongoDB 7** in containers, including the atomicity guarantee below. One contract
 > suite is run against every store, the in-memory double included; see

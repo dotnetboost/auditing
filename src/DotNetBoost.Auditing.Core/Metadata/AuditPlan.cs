@@ -132,11 +132,10 @@ public sealed class AuditPlan
 
         var rules = new Dictionary<string, AuditPropertyRule>(StringComparer.Ordinal);
 
-        foreach (var property in declared.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        // The same set AuditSchema describes, so a described property and a recorded one are the
+        // same property.
+        foreach (var property in AuditSchema.AuditableProperties(declared))
         {
-            if (property.GetIndexParameters().Length > 0)
-                continue;
-
             var isIgnored  = property.GetCustomAttribute<AuditIgnoreAttribute>(inherit: true) is not null;
             var isRedacted = property.GetCustomAttribute<AuditRedactAttribute>(inherit: true) is not null;
 

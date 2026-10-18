@@ -84,6 +84,13 @@ const select = (entry: AuditEntry) => {
           </p>
         </UCard>
 
+        <!--
+          Read from the API, not written out here: the three attributes on Product are facts the
+          engine already publishes, and a hand-written copy of them in the dashboard would be wrong
+          the first time somebody changed one.
+        -->
+        <AuditEntityModel name="Product" />
+
         <UCard :ui="{ body: 'p-0 sm:p-0' }">
           <template #header>
             <div class="flex items-center justify-between">

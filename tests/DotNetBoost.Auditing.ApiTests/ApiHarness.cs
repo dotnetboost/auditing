@@ -29,6 +29,30 @@ public class Product
     public string SupplierSecret { get; set; } = "";
 }
 
+/// <summary>
+/// Declared but not an EF Core entity: the registry is a map from stored name to type, and plenty
+/// of applications declare entities they address by hand. Carries a name of its own, a retention of
+/// its own and an ignored property, which is three facts the discovery endpoints have to report.
+/// </summary>
+[AuditEntity("Invoice")]
+[AuditRetention(Days = 30)]
+public class InvoiceRecord
+{
+    public int Id { get; set; }
+    public string Number { get; set; } = "";
+    public decimal? Total { get; set; }
+
+    [AuditIgnore]
+    public DateTime LastSeenAt { get; set; }
+}
+
+/// <summary>Declared and excluded — what an entity with <c>[AuditIgnore]</c> on the class looks like.</summary>
+[AuditIgnore]
+public class SessionPing
+{
+    public int Id { get; set; }
+}
+
 public class ApiDbContext(DbContextOptions<ApiDbContext> options) : DbContext(options)
 {
     public DbSet<Product> Products => Set<Product>();
@@ -118,6 +142,7 @@ internal sealed class ApiHarness : IAsyncDisposable
                             .UseEntityFrameworkCore<ApiDbContext>()
                             .UseHttpContextActor()
                             .DeclareEntity<Product>()
+                            .DeclareEntities(typeof(InvoiceRecord), typeof(SessionPing))
                             .Build();
                 })
                 .Configure(app =>
