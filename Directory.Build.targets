@@ -1,0 +1,14 @@
+<Project>
+
+  <!--
+    Directory.Build.props declares <PackageReadmeFile> and <PackageIcon>, but naming a file
+    there does not pack it — it only says which packed file to use. Both have to be included
+    as content as well. This lives in .targets rather than .props so that IsPackable (set
+    inside each project) is already known here.
+  -->
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

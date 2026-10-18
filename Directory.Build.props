@@ -1,0 +1,46 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!--
+      Single source of truth for the version every package ships under. CI overrides it with
+      -p:PackageVersion=… derived from the git tag, so this is what a local build produces and
+      the floor a release is cut from. Bump it here, not in the individual projects.
+    -->
+    <Version>1.0.0</Version>
+
+    <Authors>DotNetBoost Contributors</Authors>
+    <Company>DotNetBoost</Company>
+    <!-- 2026 is the year of first publication. Deliberately a literal rather than derived from
+         the build date: that would make the package contents vary by build day and defeat
+         <Deterministic>. Extend to a range (2026-2027) rather than replacing the year. -->
+    <Copyright>© 2026 DotNetBoost Contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/dotnetboost/auditing</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/dotnetboost/auditing</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>audit;audit-trail;auditing;change-history;entity-changes;dotnet;aspnetcore;efcore</PackageTags>
+
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Build-time only: it embeds source-control metadata into the PDBs. PrivateAssets="All"
+         keeps it out of the packages' dependencies, so users never download it. -->
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+  </ItemGroup>
+</Project>

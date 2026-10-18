@@ -1,0 +1,31 @@
+# Analyzer rules relaxed for test projects only.
+
+[*.cs]
+
+# CA1707: xunit test methods use Method_Scenario_ExpectedResult naming,
+# where underscores are the convention rather than a defect.
+dotnet_diagnostic.CA1707.severity = none
+
+# CA1711: xunit collection-definition classes are named XxxCollection by convention;
+# the rule's "Collection means IEnumerable" heuristic does not apply to them.
+dotnet_diagnostic.CA1711.severity = none
+
+# CA1819 / CA1034: test fixtures expose byte[] payloads and nested helper types freely;
+# neither is a public API anyone consumes.
+dotnet_diagnostic.CA1819.severity = none
+dotnet_diagnostic.CA1034.severity = none
+
+# CA2007: ConfigureAwait(false) is meaningless in xunit, which has no synchronization context.
+dotnet_diagnostic.CA2007.severity = none
+
+# CA1001: xunit fixtures release their resources through IAsyncLifetime.DisposeAsync, which the
+# analyzer does not recognise as ownership being discharged.
+dotnet_diagnostic.CA1001.severity = none
+
+# CA1859: test fixtures deliberately hold the INTERFACE the library exposes, because that is what
+# application code holds and therefore what the test should exercise.
+dotnet_diagnostic.CA1859.severity = none
+
+# CA1861: collection expressions as assertion arguments are the point of the assertion,
+# not a repeated allocation worth hoisting into a field.
+dotnet_diagnostic.CA1861.severity = none

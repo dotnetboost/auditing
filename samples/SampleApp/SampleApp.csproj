@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- Pure JSON API: no wwwroot, so skip the static web assets manifest. -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Core/DotNetBoost.Auditing.Core.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.EntityFrameworkCore/DotNetBoost.Auditing.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.API/DotNetBoost.Auditing.API.csproj" />
+    <!-- OpenTelemetry, health checks, service discovery and resilient HttpClients. -->
+    <ProjectReference Include="../../aspire/DotNetBoost.Auditing.ServiceDefaults/DotNetBoost.Auditing.ServiceDefaults.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+
+  <!--
+    Store for the trail. Exactly one group below is active; it must match the active block in
+    Program.cs and the container started by aspire/DotNetBoost.Auditing.AppHost.
+  -->
+  <ItemGroup Label="Store — ACTIVE: PostgreSQL (EF Core)">
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <ItemGroup Label="Store — ALTERNATIVE: SQL Server (EF Core)">
+    <!-- <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" /> -->
+  </ItemGroup>
+
+  <ItemGroup Label="Store — ALTERNATIVE: SQLite (EF Core, no container)">
+    <!-- <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" /> -->
+  </ItemGroup>
+
+  <!--
+    The Dapper and MongoDB stores are alternatives too, and the sample does not show them: both
+    record EXPLICITLY, because neither has a change tracker to read. Everything below that happens
+    by itself would have to be written out by hand — which is the point docs/stores.md makes, and
+    not a thing a sample can demonstrate twice without becoming two samples.
+  -->
+</Project>

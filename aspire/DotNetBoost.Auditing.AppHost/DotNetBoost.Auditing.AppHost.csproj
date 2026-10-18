@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Turns this project into an Aspire AppHost: generates the strongly typed
+       `Projects.*` handles used by AddProject<T>() and the `aspire run` entry point. -->
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsAspireHost>true</IsAspireHost>
+    <!-- Resolves DCP (the orchestrator) and the Aspire dashboard from the Aspire CLI bundle.
+         Uses the `aspire` CLI when it is on PATH; otherwise falls back to `dnx aspire.cli`, which
+         fetches the same bundle from NuGet — so no CLI install is required to run this. -->
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>dotnetboost-auditing-apphost</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+
+    <!-- Container for the database holding the sample's tables and the trail. Only the integration
+         used by the *active* block in AppHost.cs is referenced; the commented-out block names the
+         package its alternative needs. -->
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+
+    <!-- Runs the Nuxt dashboard in clients/dashboard as an orchestrated resource. -->
+    <PackageReference Include="Aspire.Hosting.JavaScript" />
+
+    <!-- Alternative — uncomment alongside its block in AppHost.cs. -->
+    <!-- <PackageReference Include="Aspire.Hosting.SqlServer" /> -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The API host. IsAspireProjectResource makes the Aspire SDK emit Projects.SampleApp. -->
+    <ProjectReference Include="../../samples/SampleApp/SampleApp.csproj" />
+  </ItemGroup>
+
+</Project>

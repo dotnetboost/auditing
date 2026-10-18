@@ -1,0 +1,35 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.cs]
+csharp_new_line_before_open_brace = all
+# Single-line guard clauses (`if (x) return;`) are the established style in this
+# codebase; braces are still required once a block spans multiple lines.
+csharp_prefer_braces = when_multiline:warning
+dotnet_sort_system_directives_first = true
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_using_directive_placement = outside_namespace:warning
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# CA1716: `IAuditRecorder.For(...)` mirrors `IMediaManager.For(...)`, `ISettingManager.For<T>()`
+# and `IMultiLingualManager.For(...)`, so all four libraries read the same way. It collides with
+# VB keywords only, as it does in the other three.
+[*.cs]
+dotnet_diagnostic.CA1716.severity = none

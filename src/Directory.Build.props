@@ -1,0 +1,36 @@
+<Project>
+
+  <!--
+    MSBuild imports only the *nearest* Directory.Build.props, so the repository-root file
+    has to be pulled in explicitly before anything here overrides it.
+  -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!--
+    The shipped packages multi-target net8.0 (LTS) alongside net10.0. Everything else in the
+    repository — tests, samples — keeps the single TFM from the root file.
+  -->
+  <PropertyGroup>
+    <TargetFramework />
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <!--
+    Ship the XML docs so they reach consumers' IntelliSense. Only the packable libraries
+    produce one; tests and samples have no consumers to document for.
+  -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    No transitive pinning for the shipped packages: their NuGet dependencies should be exactly
+    what they reference, at the minimum versions they need. See Directory.Packages.props.
+  -->
+  <PropertyGroup>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+    <!-- Selects the minimum-version dependency table in Directory.Packages.props. -->
+    <IsShippedLibrary>true</IsShippedLibrary>
+  </PropertyGroup>
+
+</Project>

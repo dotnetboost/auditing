@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Both shipped TFMs, so net8.0 support is executed rather than assumed. -->
+    <TargetFramework />
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Every store together, deliberately. Testing them against each other is the point: the
+      conformance suite in TestSupport is inherited once per store here, so a filter that means
+      something slightly different in one of them fails next to the two that agree.
+    -->
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Core/DotNetBoost.Auditing.Core.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.EntityFrameworkCore/DotNetBoost.Auditing.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Dapper/DotNetBoost.Auditing.Dapper.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.MongoDb/DotNetBoost.Auditing.MongoDb.csproj" />
+    <ProjectReference Include="../DotNetBoost.Auditing.TestSupport/DotNetBoost.Auditing.TestSupport.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- SQLite in memory, so both relational stores run against a real engine without a container.
+         The engine-specific behaviour the others need is covered in IntegrationTests. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+</Project>

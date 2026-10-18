@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>DotNetBoost.Auditing.Dapper</PackageId>
+    <Description>
+      Dapper store for DotNetBoost.Auditing, for applications that do not use EF Core. The two
+      tables are the same shape the EF Core store maps — same names, lengths and indexes — so one
+      database serves either. Recording is explicit rather than captured: there is no change
+      tracker to read, so entries are written through IAuditRecorder and commit with your own work
+      when you hand the store your transaction. SQL written for SQL Server, PostgreSQL and SQLite.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DotNetBoost.Auditing.ProviderTests" />
+    <InternalsVisibleTo Include="DotNetBoost.Auditing.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../DotNetBoost.Auditing.Core/DotNetBoost.Auditing.Core.csproj" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,186 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags:    [ 'v*.*.*' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  NUGET_FEED: https://api.nuget.org/v3/index.json
+
+jobs:
+  build-and-unit-test:
+    name: Build & Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      # Both shipped TFMs are built and tested, so net8.0 support is executed rather
+      # than assumed. The 8.0 SDK is needed for its targeting pack.
+      - name: Setup .NET SDKs
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore
+
+      # Warnings are errors in Directory.Build.props, so this is also the lint step.
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      # Named rather than globbed: tests/ also holds TestSupport, which is a library of doubles and
+      # not a test project, and the container suite has a job of its own — this one should fail for
+      # a broken test, not for a Docker daemon that was slow to start.
+      - name: Unit, provider and API tests
+        run: >-
+          dotnet test
+          tests/DotNetBoost.Auditing.UnitTests
+          tests/DotNetBoost.Auditing.ProviderTests
+          tests/DotNetBoost.Auditing.ApiTests
+          --configuration Release
+          --no-build
+          --logger "trx"
+          --results-directory ./test-results
+          --collect:"XPlat Code Coverage"
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: ./test-results
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────────────
+  integration-test:
+    name: Integration Tests (PostgreSQL, SQL Server, MongoDB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Setup .NET SDKs
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # Testcontainers starts each engine itself, so there are no service containers here. The
+      # runner is amd64, which is the only platform Microsoft publishes a SQL Server image for —
+      # on an arm64 developer machine that fixture runs under emulation instead.
+      - name: Integration tests
+        run: >-
+          dotnet test tests/DotNetBoost.Auditing.IntegrationTests
+          --configuration Release
+          --logger "trx;LogFileName=integration.trx"
+          --results-directory ./test-results
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: ./test-results
+          retention-days: 7
+
+  pack:
+    name: Pack
+    runs-on: ubuntu-latest
+    needs: [build-and-unit-test, integration-test]
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Setup .NET SDKs
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # A tag sets the shipped version; any other build packs the floor from
+      # Directory.Build.props so that packing itself is exercised on every push.
+      - name: Resolve package version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack
+        run: |
+          if [[ -n "${{ steps.version.outputs.value }}" ]]; then
+            dotnet pack --configuration Release -o ./nupkgs -p:PackageVersion=${{ steps.version.outputs.value }}
+          else
+            dotnet pack --configuration Release -o ./nupkgs
+          fi
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs
+          path: ./nupkgs/*
+          retention-days: 7
+
+  publish:
+    name: Publish to NuGet
+    runs-on: ubuntu-latest
+    needs: pack
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 10
+    environment: nuget
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nupkgs
+          path: ./nupkgs
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # --skip-duplicate so re-running a release job is harmless rather than a failure.
+      - name: Push
+        run: >-
+          dotnet nuget push "./nupkgs/*.nupkg"
+          --source ${{ env.NUGET_FEED }}
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --skip-duplicate

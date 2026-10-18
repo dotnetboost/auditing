@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>DotNetBoost.Auditing.MongoDb</PackageId>
+    <Description>
+      MongoDB store for DotNetBoost.Auditing. One collection, one document per recorded change with
+      its property changes embedded — an entry is an aggregate that is written once and read whole,
+      so it is one document rather than two collections, and the per-property question stays
+      answerable through a multikey index. Recording is explicit rather than captured: there is no
+      change tracker to read.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DotNetBoost.Auditing.ProviderTests" />
+    <InternalsVisibleTo Include="DotNetBoost.Auditing.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../DotNetBoost.Auditing.Core/DotNetBoost.Auditing.Core.csproj" />
+    <PackageReference Include="MongoDB.Driver" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Shared test doubles and conformance suites, not a test project itself. The in-memory store runs
+    the same contract suite as the real ones (see ProviderTests), so a test built on it is testing
+    against something known to behave like a database — which is the only reason a double is worth
+    having.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <TargetFramework />
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Core/DotNetBoost.Auditing.Core.csproj" />
+    <!--
+      xunit, but no runner and no test SDK: this project ships abstract suites for a test project
+      to derive from, so it needs the attributes and assertions without being collected itself.
+    -->
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+</Project>
