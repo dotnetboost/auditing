@@ -307,11 +307,18 @@ media and translations the threat model is a developer making a mistake. Nobody 
 translation to cover their tracks. Audit data is the only data in the suite that someone has a
 motive to forge or destroy, and that motive belongs to the people the data is about.
 
-That decision was already taken one layer down, three times over: `IAuditStore` has no update verb
-and never will (§3), the actor is stamped by the engine and cannot be passed by the caller (§5),
-and nothing prunes on a timer (§9). The split at the caller's edge is the fourth instance of the
-same commitment, not a lone quirk — and the reading audience (support, compliance, a history tab)
-is exactly the population that must not write.
+That decision was already taken one layer down: `IAuditStore` has no update verb and never will
+(§3), nothing prunes on a timer (§9), and the entry's id and timestamp are the engine's —
+`AuditWrite` has no field for either, so no caller backdates a row. The split at the caller's edge
+is the next instance of the same commitment, not a lone quirk, and the reading audience (support,
+compliance, a history tab) is exactly the population that must not write.
+
+**The actor is the deliberate exception, and it sharpens the point rather than weakening it.**
+`AuditWrite.Actor` overrides the ambient accessor, because a background job acting for a user and
+an import naming its source both need it. So recording access carries the ability to *misattribute*
+a change, not merely to record one — a caller that reaches `RecordAsync` can name anyone. The
+fluent path cannot: `For(x).UpdatedAsync(…)` never populates it. Keeping `RecordAsync` on an
+interface of its own is what makes "who here can do that?" answerable at a glance.
 
 It matches how the code actually comes out. Across Core, `.API` and all three samples there are
 nineteen injection sites of these interfaces and **not one takes two of them**: recording happens in
