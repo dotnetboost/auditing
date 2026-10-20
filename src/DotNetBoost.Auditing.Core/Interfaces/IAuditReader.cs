@@ -12,7 +12,13 @@ namespace DotNetBoost.Auditing.Core.Interfaces;
 /// the predecessor in this suite shipped an unbounded history call over a table that only grows,
 /// and that is on the short list of why it was deleted.
 /// </para>
+/// <para>
+/// Writing is <see cref="IAuditRecorder"/>; deleting is <see cref="IAuditPruner"/>. Injecting
+/// this one is how a history page states — and proves — that it cannot alter what it displays.
+/// </para>
 /// </summary>
+/// <seealso cref="IAuditRecorder"/>
+/// <seealso cref="IAuditPruner"/>
 public interface IAuditReader
 {
     /// <summary>One entry by id, with its property changes.</summary>

@@ -4,7 +4,7 @@
 > net8.0 and net10.0, plus 168 integration tests against PostgreSQL, SQL Server and MongoDB in
 > containers. Every store is proven against its real engine; [testing.md](testing.md) says what
 > each suite covers and what is still not covered. Written 2026-10-16 before any code existed, so the boundaries were chosen
-> rather than discovered — where building changed one, the section says so. §12 lists those; what
+> rather than discovered — where building changed one, the section says so. §13 lists those; what
 > the library cannot do is in [limitations.md](limitations.md) and the HTTP surface is in
 > [rest-api.md](rest-api.md).
 
@@ -77,7 +77,7 @@ written down so the answer stays no.
   different jobs. A revert needs domain rules the library cannot see.
 - **No tamper-proofing in v1** — no hash chain, no signing, no append-only enforcement. A user with
   `DELETE` on the table can erase the trail. Anyone who needs more needs database-level controls, and
-  claiming otherwise in a `1.0` would be a security lie. Possible post-1.0 opt-in; see §11.
+  claiming otherwise in a `1.0` would be a security lie. Possible post-1.0 opt-in; see §12.
 - **No UI beyond the dashboard.** The REST API and the Nuxt dashboard the other libraries ship, and
   nothing embedded in anyone's admin panel.
 
@@ -286,10 +286,53 @@ later nicety:
 - No hosted background service in `.Core`. An opt-in one in `.API` or the Aspire sample, so the
   library never starts a timer in a process that did not ask for it.
 
-## 10. Packages
+## 10. Three services, not one manager
+
+Recording, reading and pruning are three interfaces, not three method groups on one:
+
+| | |
+|---|---|
+| `IAuditRecorder` | writes. `For(entity)`, `For(name, id)`, `RecordAsync`, `IsAudited` |
+| `IAuditReader` | reads. Every read clamped to a page (§8) |
+| `IAuditPruner` | deletes. Retention and erasure, and the only thing that deletes (§9) |
+
+**The other three libraries in the suite do the opposite, and are right to.**
+`ISettingManager` is "entry-point for reading and writing"; `IMediaManager` is "the one service
+application code injects"; `IMultiLingualManager` covers translations and hangs language
+administration off a `Languages` accessor. One façade per library, because in those libraries the
+same admin screen that reads also writes, and splitting would be ceremony.
+
+**What makes this library different is that it is the only one with an adversary.** For settings,
+media and translations the threat model is a developer making a mistake. Nobody tampers with a
+translation to cover their tracks. Audit data is the only data in the suite that someone has a
+motive to forge or destroy, and that motive belongs to the people the data is about.
+
+That decision was already taken one layer down, three times over: `IAuditStore` has no update verb
+and never will (§3), the actor is stamped by the engine and cannot be passed by the caller (§5),
+and nothing prunes on a timer (§9). The split at the caller's edge is the fourth instance of the
+same commitment, not a lone quirk — and the reading audience (support, compliance, a history tab)
+is exactly the population that must not write.
+
+It matches how the code actually comes out. Across Core, `.API` and all three samples there are
+nineteen injection sites of these interfaces and **not one takes two of them**: recording happens in
+write paths, reading in query paths, pruning in a job that runs nightly and touches nothing else.
+An aggregate over three things never used together would have no cohesion to offer.
+
+**What this costs.** Discoverability. Someone arriving from `DotNetBoost.Media` will type
+`IAuditManager`, find nothing, and have to learn three names instead of one. That is a real tax and
+it is paid by every new reader; the mitigation is `<seealso>` on all three interfaces and this
+section, not a fourth type.
+
+**What it does not buy: enforcement.** A developer with commit access can inject `IAuditPruner` and
+delete the trail. The split stops accidents, not insiders. What it buys is legibility — "which code
+can write to the audit trail?" is answerable by reading constructors, and granting that privilege
+shows up in a diff as a signature change rather than one line inside a method. In a library about
+compliance that is a question someone eventually asks.
+
+## 11. Packages
 
 ```
-DotNetBoost.Auditing.Core                  attributes · IAuditRecorder · IAuditReader
+DotNetBoost.Auditing.Core                  attributes · IAuditRecorder · IAuditReader · IAuditPruner
                                            IAuditActorAccessor · IAuditStore · options · DI
 DotNetBoost.Auditing.EntityFrameworkCore   the SaveChanges interceptor + the EF store
 DotNetBoost.Auditing.Dapper                store only; recording is explicit
@@ -316,7 +359,7 @@ shared contract, none of their names in the source or the `.csproj` files.
 
 Repository: `~/dev/dotnetboost-auditing`, `github.com/dotnetboost/auditing`.
 
-## 11. Post-1.0, explicitly not now
+## 12. Post-1.0, explicitly not now
 
 - **Hash-chained entries** — each row carrying the previous row's hash, so deletion is detectable.
   Opt-in, because it serialises writes.
@@ -324,7 +367,7 @@ Repository: `~/dev/dotnetboost-auditing`, `github.com/dotnetboost/auditing`.
   point-in-time reconstruction §2 refuses to fake.
 - **A second actor dimension** — impersonation (`ActorOnBehalfOf`), once someone asks twice.
 
-## 12. Settled by building Core
+## 13. Settled by building Core
 
 - **`AuditModelRegistry` and `DeclareEntitiesFrom`.** §7b assumed a write addressed by hand simply
   has no model rules. That is a hole, and the one place a hole is unacceptable: a Dapper application
@@ -346,7 +389,7 @@ Repository: `~/dev/dotnetboost-auditing`, `github.com/dotnetboost/auditing`.
   write because a legacy `Activity` id grew past the column would be the library breaking the
   application over its own bookkeeping.
 
-## 13. Still to settle
+## 14. Still to settle
 
 1. **`DotNetBoost.Abstractions`.** The sample's decision was: extract `ICurrentUser` /
    `ICurrentTenant` only once a *second* library needs them, from two working consumers, never

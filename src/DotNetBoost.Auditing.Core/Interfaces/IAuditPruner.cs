@@ -13,7 +13,14 @@ namespace DotNetBoost.Auditing.Core.Interfaces;
 /// Nothing runs a prune on its own. There is no hosted service in Core and no timer: a library that
 /// quietly deleted history in a process that never asked it to would be the wrong kind of helpful,
 /// and the one irreversible thing it does should be something an application schedules.
+/// <para>
+/// The only one of the library's three services that deletes. Writing is
+/// <see cref="IAuditRecorder"/> and reading is <see cref="IAuditReader"/>; keeping erasure on a
+/// type of its own means a class that can delete a trail had to ask for it in its constructor.
+/// </para>
 /// </remarks>
+/// <seealso cref="IAuditRecorder"/>
+/// <seealso cref="IAuditReader"/>
 public interface IAuditPruner
 {
     /// <summary>

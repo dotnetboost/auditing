@@ -3,7 +3,7 @@ using DotNetBoost.Auditing.Core.Models;
 namespace DotNetBoost.Auditing.Core.Interfaces;
 
 /// <summary>
-/// Records changes. The one service application code injects.
+/// Records changes. One of the library's three services, and the only one that writes.
 /// <code>
 /// await audit.For(product).UpdatedAsync(
 /// [
@@ -17,7 +17,15 @@ namespace DotNetBoost.Auditing.Core.Interfaces;
 /// <c>DotNetBoost.Auditing.EntityFrameworkCore</c>, and does not call this at all for ordinary
 /// saves.
 /// </para>
+/// <para>
+/// Reading is <see cref="IAuditReader"/>; deleting is <see cref="IAuditPruner"/>. A class is
+/// given whichever of the three it needs and no more, so what it can do to the trail is visible at
+/// its constructor rather than in its method bodies. There is deliberately no single service
+/// combining them — see <c>docs/scope.md</c>.
+/// </para>
 /// </summary>
+/// <seealso cref="IAuditReader"/>
+/// <seealso cref="IAuditPruner"/>
 public interface IAuditRecorder
 {
     /// <summary>
