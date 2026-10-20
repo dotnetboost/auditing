@@ -32,7 +32,7 @@ missing:
 | | |
 |---|---|
 | `architecture.md` | The engine, the store contract, and where the rules are applied |
-| `recording.md` | `IAuditRecorder` in full, and the three capture sources |
-| `querying.md` | `IAuditReader`, the clamp, and the filters |
-| `retention.md` | `IAuditPruner`, per-entity retention, and the erasure path |
+| `recording.md` | `IAuditManager.For(…)` in full, and the three capture sources |
+| `querying.md` | The read verbs, the clamp, and the filters |
+| `retention.md` | Pruning, per-entity retention, and the erasure path |
 | `redaction.md` | `[AuditIgnore]` vs `[AuditRedact]`, and why the engine owns both |

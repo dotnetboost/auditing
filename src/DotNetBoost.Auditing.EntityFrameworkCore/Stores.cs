@@ -31,7 +31,7 @@ public sealed class EfCoreAuditStore(DbContext context) : IAuditStore
     /// failure in between would leave a trail of something that never happened.
     /// <para>
     /// For the interceptor this is exactly right: the rows join the save already in flight. For an
-    /// explicit <c>IAuditRecorder</c> call it means the entry is durable when <b>you</b> call
+    /// explicit <c>IAuditManager</c> call it means the entry is durable when <b>you</b> call
     /// <c>SaveChangesAsync</c> on your context, which is the next thing an EF Core application does
     /// anyway. If you record against a context with nothing else pending, save it.
     /// </para>

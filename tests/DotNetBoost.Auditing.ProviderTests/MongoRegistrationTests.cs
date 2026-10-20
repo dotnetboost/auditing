@@ -27,9 +27,9 @@ public class MongoRegistrationTests
         using var scope = provider.CreateScope();
 
         Assert.IsType<MongoAuditStore>(scope.ServiceProvider.GetRequiredService<IAuditStore>());
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditRecorder>());
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditReader>());
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditPruner>());
+        // One interface now, so this is one assertion rather than three — and the engines
+        // behind it must resolve too, or the manager could not have been constructed.
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditManager>());
     }
 
     [Fact]

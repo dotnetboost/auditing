@@ -191,7 +191,7 @@ namespace DotNetBoost.Auditing.API
         /// <summary>
         /// Whether to map <c>POST {prefix}/prune</c>. <b>Default <c>false</c></b>, for the same
         /// reason as <see cref="MapErasure"/>: a prune deletes history, and most applications should
-        /// schedule <see cref="IAuditPruner"/> rather than expose it.
+        /// schedule <see cref="IAuditManager.PruneAsync(int, CancellationToken)"/> rather than expose it.
         /// </summary>
         public bool MapPrune { get; set; }
 
@@ -352,16 +352,16 @@ namespace DotNetBoost.Auditing.API
 
             var byName = declared.ToDictionary(e => e.Name, StringComparer.Ordinal);
 
-            group.MapGet("/entities", (IAuditRecorder recorder, AuditingOptions options) =>
+            group.MapGet("/entities", (IAuditManager audit, AuditingOptions options) =>
                 TypedResults.Ok(new AuditEntitiesResponse(
                     MaxPageSize: options.MaxPageSize,
-                    Entities:    [.. declared.Select(e => e.Describe(recorder, options))])))
+                    Entities:    [.. declared.Select(e => e.Describe(audit, options))])))
                 .WithName("ListAuditEntities")
                 .WithSummary("The declared entities and the page bound. Returns nothing recorded.")
                 .Produces<AuditEntitiesResponse>();
 
             group.MapGet("/entities/{entityName}", Results<Ok<AuditEntitySchema>, NotFound> (
-                IAuditRecorder recorder,
+                IAuditManager audit,
                 AuditingOptions options,
                 string entityName) =>
             {
@@ -379,7 +379,7 @@ namespace DotNetBoost.Auditing.API
                         Rule:     p.Rule.ToString()))
                     .ToList();
 
-                var described = entity.Describe(recorder, options);
+                var described = entity.Describe(audit, options);
 
                 return TypedResults.Ok(new AuditEntitySchema(
                     Name:            described.Name,
@@ -415,15 +415,15 @@ namespace DotNetBoost.Auditing.API
             /// <summary>
             /// The entity as it stands now.
             /// <para>
-            /// <c>Audited</c> is asked of <see cref="IAuditRecorder"/> rather than worked out from
-            /// the attributes here, so that one definition of "audited" serves both the recorder
+            /// <c>Audited</c> is asked of <see cref="IAuditManager"/> rather than worked out from
+            /// the attributes here, so that one definition of "audited" serves both the audit
             /// and anything reading this endpoint.
             /// </para>
             /// </summary>
-            public AuditEntityDescriptor Describe(IAuditRecorder recorder, AuditingOptions options) =>
+            public AuditEntityDescriptor Describe(IAuditManager audit, AuditingOptions options) =>
                 new(Name:            Name,
                     ClrType:         Type.Name,
-                    Audited:         recorder.IsAudited(Type),
+                    Audited:         audit.IsAudited(Type),
                     OptedIn:         OptedIn,
                     Ignored:         Ignored,
                     RetentionDays:   (OwnRetention ?? options.Retention)?.TotalDays,
@@ -449,7 +449,7 @@ namespace DotNetBoost.Auditing.API
         /// object so that each one is named in the OpenAPI document.
         /// </summary>
         private static async Task<Ok<AuditPageResponse>> QueryAsync(
-            IAuditReader reader,
+            IAuditManager audit,
             string? entityName,
             string? entityId,
             AuditAction? action,
@@ -475,24 +475,24 @@ namespace DotNetBoost.Auditing.API
                 From           = from,
                 To             = to,
                 Skip           = skip ?? 0,
-                // Zero means "the configured default", which the reader applies. Passing it through
+                // Zero means "the configured default", which the audit applies. Passing it through
                 // rather than inventing one here keeps one definition of the page size.
                 Take           = take ?? 0,
                 IncludeTotal   = includeTotal ?? false,
                 IncludeChanges = includeChanges ?? true
             };
 
-            var page = await reader.QueryAsync(query, ct).ConfigureAwait(false);
+            var page = await audit.QueryAsync(query, ct).ConfigureAwait(false);
             return TypedResults.Ok(AuditPageResponse.From(page, query.Skip < 0 ? 0 : query.Skip));
         }
 
         /// <summary><c>GET {prefix}/{id}</c>.</summary>
         private static async Task<Results<Ok<AuditEntryResponse>, NotFound>> GetAsync(
-            IAuditReader reader,
+            IAuditManager audit,
             Guid id,
             CancellationToken ct)
         {
-            var entry = await reader.GetAsync(id, ct).ConfigureAwait(false);
+            var entry = await audit.GetAsync(id, ct).ConfigureAwait(false);
 
             return entry is null
                 ? TypedResults.NotFound()
@@ -501,12 +501,12 @@ namespace DotNetBoost.Auditing.API
 
         /// <summary><c>DELETE {prefix}/entity/{entityName}/{entityId}</c>.</summary>
         private static async Task<Ok<DeletionResponse>> EraseEntityAsync(
-            IAuditPruner pruner,
+            IAuditManager audit,
             string entityName,
             string entityId,
             CancellationToken ct)
         {
-            var deleted = await pruner.EraseForAsync(entityName, entityId, ct).ConfigureAwait(false);
+            var deleted = await audit.EraseForAsync(entityName, entityId, ct).ConfigureAwait(false);
 
             // 200 with a count of zero rather than 404: an entity with no trail and an entity that
             // never existed are the same observation here, and "nothing to erase" is a successful
@@ -516,17 +516,17 @@ namespace DotNetBoost.Auditing.API
 
         /// <summary><c>DELETE {prefix}/actor/{actor}</c>.</summary>
         private static async Task<Ok<DeletionResponse>> EraseActorAsync(
-            IAuditPruner pruner,
+            IAuditManager audit,
             string actor,
             CancellationToken ct)
         {
-            var deleted = await pruner.EraseForActorAsync(actor, ct).ConfigureAwait(false);
+            var deleted = await audit.EraseForActorAsync(actor, ct).ConfigureAwait(false);
             return TypedResults.Ok(new DeletionResponse(deleted));
         }
 
         /// <summary><c>POST {prefix}/prune</c>.</summary>
         private static async Task<Ok<DeletionResponse>> PruneAsync(
-            IAuditPruner pruner,
+            IAuditManager audit,
             PruneRequest? request,
             CancellationToken ct)
         {
@@ -534,10 +534,10 @@ namespace DotNetBoost.Auditing.API
             var batchSize = body.BatchSize;
 
             var deleted = body.OlderThanDays is { } days
-                ? await pruner
+                ? await audit
                     .PruneOlderThanAsync(TimeSpan.FromDays(days), Trimmed(body.EntityName), batchSize, ct)
                     .ConfigureAwait(false)
-                : await pruner.PruneAsync(batchSize, ct).ConfigureAwait(false);
+                : await audit.PruneAsync(batchSize, ct).ConfigureAwait(false);
 
             return TypedResults.Ok(new DeletionResponse(deleted));
         }

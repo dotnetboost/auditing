@@ -60,7 +60,7 @@ public class SqliteCrossStoreTests
 
         // Dapper reads it out of the same database.
         var read = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(written.Id));
+            sp.GetRequiredService<IAuditManager>().GetAsync(written.Id));
 
         Assert.NotNull(read);
         Assert.Equal("Product", read.EntityName);
@@ -123,7 +123,7 @@ public class SqliteCrossStoreTests
         }
 
         var read = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(written.Id));
+            sp.GetRequiredService<IAuditManager>().GetAsync(written.Id));
 
         Assert.NotNull(read);
         Assert.Equal("99", read.EntityId);

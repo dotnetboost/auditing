@@ -22,7 +22,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// Two lines, and they do different things. This one says <i>where entries are kept</i>.
         /// <see cref="AuditingDbContextOptionsExtensions.UseAuditing"/> on the context says
         /// <i>capture changes to this context automatically</i> — without it the tables are still
-        /// there and <see cref="IAuditRecorder"/> still works, but nothing records itself.
+        /// there and <see cref="IAuditManager"/> still works, but nothing records itself.
         /// </para>
         /// <para>
         /// Add the tables to the model with <c>modelBuilder.ApplyAuditing()</c> in

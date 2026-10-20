@@ -52,9 +52,12 @@ namespace Microsoft.Extensions.DependencyInjection
 
             // Scoped: the store is (an EF Core DbContext, a Dapper connection), and the engine is
             // only as long-lived as the store behind it.
-            services.TryAddScoped<IAuditRecorder, AuditRecorder>();
-            services.TryAddScoped<IAuditReader, AuditReader>();
-            services.TryAddScoped<IAuditPruner, AuditPruner>();
+            // The three engines are registered as themselves, not behind interfaces: they are
+            // internal, and IAuditManager is the library's whole public surface.
+            services.TryAddScoped<AuditRecorder>();
+            services.TryAddScoped<AuditReader>();
+            services.TryAddScoped<AuditPruner>();
+            services.TryAddScoped<IAuditManager, AuditManager>();
 
             var builder = new AuditingBuilder(services);
             configure(builder.Options);

@@ -81,7 +81,7 @@ the caller has none, so a failure still rolls the change back with its trail. As
 and creations join the single-save path. [limitations.md](docs/limitations.md) has the two cases
 that cannot be made atomic.
 
-**2. Explicitly, through `IAuditRecorder`** — for Dapper and MongoDB applications, and for anything
+**2. Explicitly, through `IAuditManager`** — for Dapper and MongoDB applications, and for anything
 a change tracker cannot see: a raw `ExecuteUpdate`, a stored procedure, a domain event.
 
 ```csharp

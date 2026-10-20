@@ -47,7 +47,7 @@ public class DapperPruneTests
         await SeedAsync(harness, "Product", 2, DateTime.UtcNow);
 
         var deleted = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditPruner>().PruneAsync(batchSize: 2));
+            sp.GetRequiredService<IAuditManager>().PruneAsync(batchSize: 2));
 
         Assert.Equal(3, deleted);
         Assert.Equal(2, await CountAsync(harness, "AuditEntries"));
@@ -67,7 +67,7 @@ public class DapperPruneTests
         await SeedAsync(harness, "Product", 2, DateTime.UtcNow.AddDays(-60));
 
         var deleted = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditPruner>().PruneAsync());
+            sp.GetRequiredService<IAuditManager>().PruneAsync());
 
         // 60 days old: past the 30-day default, inside the 90-day override. Without the exclusion
         // in AuditPruneScope the global sweep would take the queries too, making [AuditRetention]
@@ -86,7 +86,7 @@ public class DapperPruneTests
         await SeedAsync(harness, "Product", 7, DateTime.UtcNow.AddDays(-90));
 
         var deleted = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditPruner>().PruneAsync(batchSize: 2));
+            sp.GetRequiredService<IAuditManager>().PruneAsync(batchSize: 2));
 
         Assert.Equal(7, deleted);
         Assert.Equal(0, await CountAsync(harness, "AuditEntries"));
@@ -99,7 +99,7 @@ public class DapperPruneTests
         await SeedAsync(harness, "Product", 2, DateTime.UtcNow.AddDays(-10));
 
         var deleted = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditPruner>().PruneOlderThanAsync(TimeSpan.FromDays(5), "Product"));
+            sp.GetRequiredService<IAuditManager>().PruneOlderThanAsync(TimeSpan.FromDays(5), "Product"));
 
         Assert.Equal(2, deleted);
     }
@@ -111,7 +111,7 @@ public class DapperPruneTests
         await SeedAsync(harness, "Product", 3, DateTime.UtcNow);
 
         var erased = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditPruner>().EraseForAsync("Product", "0"));
+            sp.GetRequiredService<IAuditManager>().EraseForAsync("Product", "0"));
 
         Assert.Equal(1, erased);
         Assert.Equal(2, await CountAsync(harness, "AuditEntries"));
@@ -125,7 +125,7 @@ public class DapperPruneTests
         await SeedAsync(harness, "Product", 2, DateTime.UtcNow);
 
         Assert.Equal(2, await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditPruner>().EraseForActorAsync("alice")));
+            sp.GetRequiredService<IAuditManager>().EraseForActorAsync("alice")));
 
         Assert.Equal(0, await CountAsync(harness, "AuditEntries"));
         Assert.Equal(0, await CountAsync(harness, "AuditPropertyChanges"));
@@ -138,7 +138,7 @@ public class DapperPruneTests
         await SeedAsync(harness, "Product", 1, DateTime.UtcNow);
 
         Assert.Equal(0, await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditPruner>().EraseForAsync("Product", "999")));
+            sp.GetRequiredService<IAuditManager>().EraseForAsync("Product", "999")));
 
         Assert.Equal(1, await CountAsync(harness, "AuditEntries"));
     }

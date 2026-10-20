@@ -37,9 +37,9 @@ public class RegistrationTests
 
         using var scope = provider.CreateScope();
 
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditRecorder>());
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditReader>());
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditPruner>());
+        // One interface now, so this is one assertion rather than three — and the engines
+        // behind it must resolve too, or the manager could not have been constructed.
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditManager>());
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class RegistrationTests
             .BuildServiceProvider();
 
         using var scope = provider.CreateScope();
-        var recorder = scope.ServiceProvider.GetRequiredService<IAuditRecorder>();
+        var recorder = scope.ServiceProvider.GetRequiredService<IAuditManager>();
 
         await recorder.For("Person", "42").UpdatedAsync(
         [

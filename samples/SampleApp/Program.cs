@@ -24,7 +24,7 @@ builder.Services.AddDbContext<AppDbContext>((sp, options) => options
                ?? throw new InvalidOperationException(
                    "No 'auditing' connection string. Run this through aspire/DotNetBoost.Auditing.AppHost, "
                    + "which starts PostgreSQL and injects it."))
-    // The capture. Without this line the tables are still there and IAuditRecorder still works,
+    // The capture. Without this line the tables are still there and IAuditManager still works,
     // but nothing records itself.
     .UseAuditing(sp));
 
@@ -199,7 +199,7 @@ products.MapDelete("/{id:int}", async (AppDbContext db, int id, CancellationToke
 
 products.MapGet("/{id:int}/history", async (
     AppDbContext db,
-    IAuditReader reader,
+    IAuditManager reader,
     int id,
     // Nullable, with defaults applied below. A non-nullable int here would make both REQUIRED query
     // parameters — minimal APIs reads "not nullable" as "must be supplied" — and the endpoint would
@@ -234,7 +234,7 @@ products.MapGet("/{id:int}/history", async (
 
 products.MapPost("/discount", async (
     AppDbContext db,
-    IAuditRecorder audit,
+    IAuditManager audit,
     ApplyDiscount body,
     CancellationToken ct) =>
 {
@@ -333,7 +333,7 @@ app.MapPost("/api/stock-checks", async (AppDbContext db, RecordStockCheck body, 
 // Retention. The library never prunes on its own: there is no hosted service and no timer, because
 // the one irreversible thing it does should be something an application schedules.
 // ─────────────────────────────────────────────────────────────────────────────
-app.MapPost("/api/maintenance/prune", async (IAuditPruner pruner, int? batchSize, CancellationToken ct) =>
+app.MapPost("/api/maintenance/prune", async (IAuditManager pruner, int? batchSize, CancellationToken ct) =>
 {
     var deleted = await pruner.PruneAsync(batchSize is > 0 ? batchSize.Value : 1000, ct);
 

@@ -5,7 +5,8 @@ using DotNetBoost.Auditing.Core.Models;
 namespace DotNetBoost.Auditing.Core.Services;
 
 /// <summary>
-/// The engine behind <see cref="IAuditPruner"/>: it works out the cutoffs from the configured and
+/// The retention half of <see cref="Interfaces.IAuditManager"/>: it works out the cutoffs from the
+/// configured and
 /// declared retentions and drains the store in batches until there is nothing left to delete.
 /// </summary>
 internal sealed class AuditPruner(
@@ -13,7 +14,7 @@ internal sealed class AuditPruner(
     IEntityKeyAccessor keys,
     AuditModelRegistry registry,
     AuditingOptions options,
-    TimeProvider timeProvider) : IAuditPruner
+    TimeProvider timeProvider)
 {
     private readonly IAuditStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IEntityKeyAccessor _keys = keys ?? throw new ArgumentNullException(nameof(keys));
@@ -21,8 +22,7 @@ internal sealed class AuditPruner(
     private readonly AuditingOptions _options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly TimeProvider _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
-    /// <inheritdoc/>
-    public async Task<int> PruneAsync(int batchSize = 1000, CancellationToken ct = default)
+    internal async Task<int> PruneAsync(int batchSize = 1000, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(batchSize, 1);
 
@@ -53,8 +53,7 @@ internal sealed class AuditPruner(
         return total;
     }
 
-    /// <inheritdoc/>
-    public Task<int> PruneOlderThanAsync(
+    internal Task<int> PruneOlderThanAsync(
         TimeSpan olderThan,
         string? entityName = null,
         int batchSize = 1000,
@@ -69,15 +68,13 @@ internal sealed class AuditPruner(
         return DrainAsync(cutoff, scope, batchSize, ct);
     }
 
-    /// <inheritdoc/>
-    public Task<int> EraseForAsync(object entity, CancellationToken ct = default)
+    internal Task<int> EraseForAsync(object entity, CancellationToken ct = default)
     {
         var (name, id) = AuditAddress.Of(entity, _keys);
         return _store.DeleteForEntityAsync(name, id, ct);
     }
 
-    /// <inheritdoc/>
-    public Task<int> EraseForAsync(string entityName, string entityId, CancellationToken ct = default)
+    internal Task<int> EraseForAsync(string entityName, string entityId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entityName);
         ArgumentException.ThrowIfNullOrWhiteSpace(entityId);
@@ -85,8 +82,7 @@ internal sealed class AuditPruner(
         return _store.DeleteForEntityAsync(entityName, entityId, ct);
     }
 
-    /// <inheritdoc/>
-    public Task<int> EraseForActorAsync(string actor, CancellationToken ct = default)
+    internal Task<int> EraseForActorAsync(string actor, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
         return _store.DeleteForActorAsync(actor, ct);

@@ -47,7 +47,7 @@ app.MapAuditEndpoints(o => o.Policy = "AuditReader");         // or under a poli
 **The destructive endpoints do not exist** unless asked for — not merely secured, absent. Erasure is
 the one irreversible thing the library does, it exists for subject-access deletion requests rather
 than routine use, and a verb that deletes a trail is not something to publish because a library
-happened to offer it. Most applications should schedule `IAuditPruner` instead of exposing it.
+happened to offer it. Most applications should schedule `IAuditManager.PruneAsync` instead of exposing it.
 
 ```csharp
 app.MapAuditEndpoints(o =>

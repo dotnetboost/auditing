@@ -93,7 +93,8 @@ public sealed class AuditRedactAttribute : Attribute;
 /// <para>
 /// An order's trail and a search query's trail are not kept for the same length of time, and a
 /// single global retention forces the shorter one on both. Read by
-/// <see cref="Interfaces.IAuditPruner"/>; nothing deletes anything until a prune runs.
+/// <see cref="Interfaces.IAuditManager.PruneAsync(int, CancellationToken)"/>; nothing deletes
+/// anything until a prune runs.
 /// </para>
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]

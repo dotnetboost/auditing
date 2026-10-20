@@ -16,7 +16,7 @@ entities, so the difference is something to run rather than read: `samples/Sampl
 |---|---|---|---|
 | Status | **Built**, proven on PostgreSQL + SQL Server | **Built**, proven on PostgreSQL + SQL Server | **Built**, proven on MongoDB 7 |
 | Shape | Two tables | Two tables | **One collection**, changes embedded |
-| Capture | Automatic, from the change tracker | Explicit, through `IAuditRecorder` | Explicit |
+| Capture | Automatic, from the change tracker | Explicit, through `IAuditManager` | Explicit |
 | `AppendAsync` | **Tracks**; your `SaveChanges` commits | **Writes**, there and then | **Writes**, there and then |
 | An entry is complete in one write | With a transaction | With a transaction | **Always** — it is one document |
 | Atomic with the change | **By default** | **With your transaction** | With a session, on a replica set |

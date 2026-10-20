@@ -65,7 +65,7 @@ entity that cannot be audited cannot be given media or translations either.
 
 ## An explicit entry is durable when you save
 
-With the EF Core store, `IAuditRecorder` **tracks** the entry and does not save it. An entry
+With the EF Core store, recording **tracks** the entry and does not save it. An entry
 describes a change the caller is making, so it has to commit with that change — saving it on append
 would commit the record of a change before the change itself.
 
@@ -131,4 +131,4 @@ per-request services the capture needs to know who is acting. Use `AddDbContext`
 ## Nothing prunes on its own
 
 There is no hosted service and no timer. The one irreversible thing the library does should be
-something an application schedules — see `IAuditPruner`.
+something an application schedules — see `IAuditManager.PruneAsync`.

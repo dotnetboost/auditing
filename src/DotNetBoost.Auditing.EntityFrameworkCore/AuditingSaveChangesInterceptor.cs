@@ -59,8 +59,8 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
 
     // Resolved on first use, not injected: the recorder depends on the store, the store on the
     // DbContext, and this interceptor is created while that DbContext is still being built.
-    private IAuditRecorder? _recorder;
-    private IAuditRecorder Recorder => _recorder ??= services.GetRequiredService<IAuditRecorder>();
+    private IAuditManager? _audit;
+    private IAuditManager Audit => _audit ??= services.GetRequiredService<IAuditManager>();
 
     private AuditingOptions? _options;
     private AuditingOptions Options => _options ??= services.GetRequiredService<AuditingOptions>();
@@ -276,7 +276,7 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
             if (!EntityDiff.IsAddressable(entry))
                 continue;
 
-            if (!Recorder.IsAudited(entry.Metadata.ClrType))
+            if (!Audit.IsAudited(entry.Metadata.ClrType))
                 continue;
 
             var changes = EntityDiff.Build(entry, action, Options.RecordUpdatesWithoutBeforeImage);
@@ -338,7 +338,7 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     /// </remarks>
     private void Record(AuditWrite write)
     {
-        var recording = Recorder.RecordAsync(write);
+        var recording = Audit.RecordAsync(write);
 
         if (!recording.IsCompleted)
         {
@@ -346,7 +346,7 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
                 "The audit store did not complete synchronously. The EF Core capture tracks entries on " +
                 "the context rather than writing them, so it cannot block on a store that goes to the " +
                 "database during Append. Register the EF Core store, or record explicitly through " +
-                "IAuditRecorder instead of through the interceptor.");
+                "IAuditManager instead of through the interceptor.");
         }
 
         // Observes the result, so a failure surfaces here rather than as an unobserved exception.

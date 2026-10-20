@@ -11,7 +11,9 @@ public class AuditRecorderTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 16, 9, 30, 0, TimeSpan.Zero);
 
-    private static (AuditRecorder Recorder, RecordingAuditStore Store) Build(
+    // The subject is bound to the manager, so these exercise the public surface rather than the
+    // recording engine directly. The engines underneath are the same ones AddAuditing registers.
+    private static (IAuditManager Recorder, RecordingAuditStore Store) Build(
         Action<AuditingOptions>? configure = null,
         string? actor = null,
         AuditModelRegistry? registry = null)
@@ -20,16 +22,16 @@ public class AuditRecorderTests
         configure?.Invoke(options);
 
         var store = new RecordingAuditStore();
+        var keys  = new ConventionEntityKeyAccessor();
+        var time  = new FixedTimeProvider(Now);
+        var model = registry ?? AuditModelRegistry.Empty;
 
-        var recorder = new AuditRecorder(
-            store,
-            new FixedActorAccessor(actor),
-            new ConventionEntityKeyAccessor(),
-            registry ?? AuditModelRegistry.Empty,
-            options,
-            new FixedTimeProvider(Now));
+        var manager = new AuditManager(
+            new AuditRecorder(store, new FixedActorAccessor(actor), keys, model, options, time),
+            new AuditReader(store, keys, options),
+            new AuditPruner(store, keys, model, options, time));
 
-        return (recorder, store);
+        return (manager, store);
     }
 
     [Fact]

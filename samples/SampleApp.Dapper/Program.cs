@@ -178,7 +178,7 @@ products.MapGet("/", async (
 products.MapGet("/{id:int}", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     CancellationToken ct) =>
 {
@@ -214,7 +214,7 @@ products.MapGet("/{id:int}", async (
 products.MapPost("/", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     CreateProduct body,
     CancellationToken ct) =>
 {
@@ -256,7 +256,7 @@ products.MapPost("/", async (
 products.MapPut("/{id:int}", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     UpdateProduct body,
     CancellationToken ct) =>
@@ -321,7 +321,7 @@ products.MapPut("/{id:int}", async (
 products.MapDelete("/{id:int}", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     CancellationToken ct) =>
 {
@@ -354,7 +354,7 @@ products.MapDelete("/{id:int}", async (
 products.MapGet("/{id:int}/history", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditReader reader,
+    IAuditManager reader,
     int id,
     // Nullable, with defaults applied below. A non-nullable int here would make both REQUIRED query
     // parameters — minimal APIs reads "not nullable" as "must be supplied" — and the endpoint would
@@ -390,7 +390,7 @@ products.MapGet("/{id:int}/history", async (
 products.MapPost("/discount", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     ApplyDiscount body,
     CancellationToken ct) =>
 {
@@ -455,7 +455,7 @@ products.MapPost("/discount", async (
 products.MapPost("/{id:int}/fail", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     CancellationToken ct) =>
 {
@@ -497,7 +497,7 @@ products.MapPost("/{id:int}/fail", async (
 app.MapPost("/api/stock-checks", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     RecordStockCheck body,
     CancellationToken ct) =>
 {
@@ -532,7 +532,7 @@ app.MapPost("/api/stock-checks", async (
 // Retention. The library never prunes on its own: there is no hosted service and no timer, because
 // the one irreversible thing it does should be something an application schedules.
 // ─────────────────────────────────────────────────────────────────────────────
-app.MapPost("/api/maintenance/prune", async (IAuditPruner pruner, int? batchSize, CancellationToken ct) =>
+app.MapPost("/api/maintenance/prune", async (IAuditManager pruner, int? batchSize, CancellationToken ct) =>
 {
     var deleted = await pruner.PruneAsync(batchSize is > 0 ? batchSize.Value : 1000, ct);
 

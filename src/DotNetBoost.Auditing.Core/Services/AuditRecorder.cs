@@ -7,7 +7,8 @@ using System.Globalization;
 namespace DotNetBoost.Auditing.Core.Services;
 
 /// <summary>
-/// The engine behind <see cref="IAuditRecorder"/>: it decides whether a change is recorded, applies
+/// The recording half of <see cref="Interfaces.IAuditManager"/>: it decides whether a change is
+/// recorded, applies
 /// the model's ignore and redaction rules, formats the values, stamps the actor, correlation and
 /// time, and hands the entry to the store.
 /// <para>
@@ -22,7 +23,7 @@ internal sealed class AuditRecorder(
     IEntityKeyAccessor keys,
     AuditModelRegistry registry,
     AuditingOptions options,
-    TimeProvider timeProvider) : IAuditRecorder
+    TimeProvider timeProvider)
 {
     private readonly IAuditStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IAuditActorAccessor _actors = actors ?? throw new ArgumentNullException(nameof(actors));
@@ -31,21 +32,18 @@ internal sealed class AuditRecorder(
     private readonly AuditingOptions _options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly TimeProvider _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
-    /// <inheritdoc/>
-    public AuditSubject For(object entity)
-    {
-        var (name, id) = AuditAddress.Of(entity, _keys);
+    /// <summary>
+    /// <paramref name="entity"/>'s stored name and key. The manager turns this into an
+    /// <see cref="AuditSubject"/> bound to itself; the engine cannot, because a subject records
+    /// through the public interface and this class is not it.
+    /// </summary>
+    internal (string Name, string Id) Address(object entity) => AuditAddress.Of(entity, _keys);
 
-        // The type travels with the subject. Resolving the address and then dropping the type would
-        // cost every write through this subject its [AuditIgnore] and [AuditRedact] rules, silently.
-        return new AuditSubject(this, name, id, entity.GetType());
-    }
-
-    /// <inheritdoc/>
-    public AuditSubject For(string entityName, string entityId) => new(this, entityName, entityId);
-
-    /// <inheritdoc/>
-    public bool IsAudited(Type entityType)
+    /// <summary>
+    /// Whether <paramref name="entityType"/> is audited at all, by its attributes and the current
+    /// options.
+    /// </summary>
+    internal bool IsAudited(Type entityType)
     {
         ArgumentNullException.ThrowIfNull(entityType);
 
@@ -56,8 +54,8 @@ internal sealed class AuditRecorder(
         return !plan.Ignored && (!_options.RequireOptIn || plan.OptedIn);
     }
 
-    /// <inheritdoc/>
-    public async Task<AuditEntry?> RecordAsync(AuditWrite write, CancellationToken ct = default)
+    /// <summary>Records one change, applying the model's rules and the engine's formatting.</summary>
+    internal async Task<AuditEntry?> RecordAsync(AuditWrite write, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(write);
 

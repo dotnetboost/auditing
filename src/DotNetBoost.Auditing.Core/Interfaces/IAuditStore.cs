@@ -69,7 +69,7 @@ public interface IAuditStore
     /// Batched and resumable rather than one statement, because the first prune of a trail that has
     /// been collecting for a year is a delete of millions of rows, and one statement would hold
     /// locks across the table that recording needs. The caller loops until the count comes back
-    /// short; <see cref="IAuditPruner"/> is that loop.
+    /// short; <see cref="IAuditManager.PruneAsync(int, CancellationToken)"/> is that loop.
     /// </remarks>
     Task<int> DeleteOlderThanAsync(DateTime cutoff, AuditPruneScope scope, int batchSize, CancellationToken ct = default);
 

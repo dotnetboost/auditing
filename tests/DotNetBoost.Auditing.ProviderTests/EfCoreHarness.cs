@@ -84,7 +84,7 @@ internal sealed class EfCoreHarness : IDisposable
             o.UseSqlite(_connection);
             o.AddInterceptors(Saves);
 
-            // Without this line the tables exist and IAuditRecorder works, but nothing records
+            // Without this line the tables exist and IAuditManager works, but nothing records
             // itself — which is what the "capture off" tests check.
             if (capture)
                 o.UseAuditing(sp);

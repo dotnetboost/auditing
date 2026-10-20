@@ -311,7 +311,7 @@ public class EfCoreCaptureTests
         // The recorder is still there; it is the capture that was not attached.
         await harness.InScopeAsync(async (db, sp) =>
         {
-            await sp.GetRequiredService<IAuditRecorder>()
+            await sp.GetRequiredService<IAuditManager>()
                 .For("Product", "1")
                 .UpdatedAsync([new AuditChange(nameof(Product.Price), 1m, 2m)]);
 
@@ -328,7 +328,7 @@ public class EfCoreCaptureTests
 
         await harness.InScopeAsync(async (db, sp) =>
         {
-            await sp.GetRequiredService<IAuditRecorder>()
+            await sp.GetRequiredService<IAuditManager>()
                 .For("Product", "42")
                 .DeletedAsync();
 

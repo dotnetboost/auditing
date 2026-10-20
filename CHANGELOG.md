@@ -11,9 +11,10 @@ MongoDB in containers.
 
 ### Added
 - **`DotNetBoost.Auditing.Core`** — the engine and its contracts.
-  - `IAuditRecorder` with `For(entity)` / `For(name, id)` and `Created`/`Updated`/`Deleted` verbs;
-    `IAuditReader`, whose every read is clamped to a page; `IAuditPruner` for retention and
-    erasure; `IAuditStore` for the store packages to implement.
+  - `IAuditManager` — the one service application code injects: `For(entity)` / `For(name, id)`
+    with `Created`/`Updated`/`Deleted` verbs, reads that are always clamped to a page, and
+    retention and erasure. One interface, as in the suite's other three libraries; `scope.md` §10
+    says what the single surface cost. `IAuditStore` for the store packages to implement.
   - `AuditEntry` + `AuditPropertyChange`: two tables, one row per property that changed, no
     foreign key to the application's own tables.
   - `[AuditEntity]`, `[Audited]`, `[AuditIgnore]`, `[AuditRedact]`, `[AuditRetention]`.
@@ -169,7 +170,7 @@ MongoDB in containers.
   and nothing in any endpoint. Each endpoint demonstrates one thing — the deferred key on a
   creation, only-what-moved on an update, an `[AuditIgnore]` counter that records nothing, a trail
   that outlives the row it describes, and a set-based `ExecuteUpdate` the change tracker never sees
-  recorded explicitly through `IAuditRecorder` — rounded in the statement *and* in the entry, by the
+  recorded explicitly through `IAuditManager` — rounded in the statement *and* in the entry, by the
   same rule, so the recorded new value is exactly what the column ends up holding.
   - **No authentication and no authorization.** `SystemActorAccessor.cs` records every entry
     against `"system"`, and `MapAuditEndpoints` is opened with `RequireAuthorization = false`

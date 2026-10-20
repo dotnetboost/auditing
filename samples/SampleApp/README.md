@@ -54,7 +54,7 @@ curl -X POST localhost:5280/api/products \
 | `GET /api/products/{id}` | Bumps an `[AuditIgnore]` view counter. **Nothing is recorded** — otherwise every price change would be buried under page views |
 | `DELETE /api/products/{id}` | The row goes; **its trail does not**. Nothing cascades to the audit tables, so the `Deleted` entry with its final values is the only copy of what the row said |
 | `GET /api/products/{id}/history` | One entity's trail — and it still answers for a product that has been deleted |
-| `POST /api/products/discount` | A set-based `ExecuteUpdate` that the **change tracker never sees**, recorded explicitly through `IAuditRecorder`. This is how a Dapper or MongoDB application records *everything* — see `samples/SampleApp.Dapper` |
+| `POST /api/products/discount` | A set-based `ExecuteUpdate` that the **change tracker never sees**, recorded explicitly through `IAuditManager`. This is how a Dapper or MongoDB application records *everything* — see `samples/SampleApp.Dapper` |
 | `POST /api/products/{id}/fail` | Changes a price, saves, then throws — so you can see what the trail says afterwards. The comment explains the case that matters |
 | `POST /api/stock-checks` | A noisy entity with `[AuditRetention(Days = 30)]`, kept for a month rather than the configured year |
 | `POST /api/maintenance/prune` | Applies both retentions at once. The library never prunes on its own |

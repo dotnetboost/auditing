@@ -123,7 +123,8 @@ public sealed class AuditingOptions
     /// How long entries are kept, for entities with no <c>[AuditRetention]</c> of their own.
     /// <c>null</c> (the default) keeps everything.
     /// <para>
-    /// Setting it deletes nothing by itself — <see cref="Interfaces.IAuditPruner"/> does the work,
+    /// Setting it deletes nothing by itself —
+    /// <see cref="Interfaces.IAuditManager.PruneAsync(int, CancellationToken)"/> does the work,
     /// when something runs it. A library that silently deleted history on a timer nobody asked for
     /// would be the wrong kind of helpful.
     /// </para>

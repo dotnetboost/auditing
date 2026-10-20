@@ -32,7 +32,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 5);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { Take = 100 }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { Take = 100 }));
 
         Assert.Equal(3, page.Entries.Count);
         Assert.Null(page.Total);
@@ -53,7 +53,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 5);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery()));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery()));
 
         Assert.Equal(2, page.Entries.Count);
     }
@@ -65,7 +65,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 5);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { Take = 2, IncludeTotal = true }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { Take = 2, IncludeTotal = true }));
 
         Assert.Equal(2, page.Entries.Count);
         Assert.Equal(5, page.Total);
@@ -86,7 +86,7 @@ public class EfCoreStoreTests
         var page = await harness.InScopeAsync(async (db, sp) =>
         {
             var product = await db.Products.FirstAsync();
-            return await sp.GetRequiredService<IAuditReader>().HistoryAsync(product);
+            return await sp.GetRequiredService<IAuditManager>().HistoryAsync(product);
         });
 
         Assert.Equal(2, page.Entries.Count);
@@ -111,7 +111,7 @@ public class EfCoreStoreTests
 
         await harness.InScopeAsync(async (_, sp) =>
         {
-            var reader = sp.GetRequiredService<IAuditReader>();
+            var reader = sp.GetRequiredService<IAuditManager>();
 
             Assert.Equal(2, (await reader.QueryAsync(new AuditQuery { Actor = "alice" })).Entries.Count);
             Assert.Single((await reader.QueryAsync(new AuditQuery { ActorMissing = true })).Entries);
@@ -130,7 +130,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 1);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { IncludeChanges = false }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { IncludeChanges = false }));
 
         Assert.Empty(Assert.Single(page.Entries).Changes);
     }
@@ -144,12 +144,12 @@ public class EfCoreStoreTests
         var id = Assert.Single(await harness.EntriesAsync()).Id;
 
         var entry = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(id));
+            sp.GetRequiredService<IAuditManager>().GetAsync(id));
 
         Assert.NotNull(entry);
         Assert.NotEmpty(entry.Changes);
         Assert.Null(await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(Guid.NewGuid())));
+            sp.GetRequiredService<IAuditManager>().GetAsync(Guid.NewGuid())));
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class EfCoreStoreTests
                 s.SetProperty(e => e.OccurredAt, DateTime.UtcNow.AddDays(-90))));
 
         var deleted = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditPruner>().PruneAsync(batchSize: 2));
+            sp.GetRequiredService<IAuditManager>().PruneAsync(batchSize: 2));
 
         Assert.Equal(3, deleted);
         Assert.Empty(await harness.EntriesAsync());
@@ -183,7 +183,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 2);
 
         Assert.Equal(0, await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditPruner>().PruneAsync()));
+            sp.GetRequiredService<IAuditManager>().PruneAsync()));
 
         Assert.Equal(2, (await harness.EntriesAsync()).Count);
     }
@@ -197,7 +197,7 @@ public class EfCoreStoreTests
         var erased = await harness.InScopeAsync(async (db, sp) =>
         {
             var product = await db.Products.FirstAsync();
-            return await sp.GetRequiredService<IAuditPruner>().EraseForAsync(product);
+            return await sp.GetRequiredService<IAuditManager>().EraseForAsync(product);
         });
 
         Assert.Equal(1, erased);
@@ -223,7 +223,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 1);
 
         var erased = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditPruner>().EraseForActorAsync("alice"));
+            sp.GetRequiredService<IAuditManager>().EraseForActorAsync("alice"));
 
         Assert.Equal(2, erased);
         Assert.Equal("bob", Assert.Single(await harness.EntriesAsync()).Actor);
