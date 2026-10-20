@@ -199,7 +199,7 @@ products.MapDelete("/{id:int}", async (AppDbContext db, int id, CancellationToke
 
 products.MapGet("/{id:int}/history", async (
     AppDbContext db,
-    IAuditManager reader,
+    IAuditManager audit,
     int id,
     // Nullable, with defaults applied below. A non-nullable int here would make both REQUIRED query
     // parameters — minimal APIs reads "not nullable" as "must be supplied" — and the endpoint would
@@ -213,10 +213,10 @@ products.MapGet("/{id:int}/history", async (
     // Addressed by hand when the row is gone: the trail outlives the entity, so a history endpoint
     // that needed the entity to exist could not show the deletion.
     //
-    // Zero means "the configured default page", which the reader applies — this endpoint does not
+    // Zero means "the configured default page", which the manager applies — this endpoint does not
     // get to invent a page size of its own.
     var page = product is null
-        ? await reader.QueryAsync(
+        ? await audit.QueryAsync(
             new AuditQuery
             {
                 EntityName = "Product",
@@ -224,7 +224,7 @@ products.MapGet("/{id:int}/history", async (
                 Skip       = skip ?? 0,
                 Take       = take ?? 0
             }, ct)
-        : await reader.HistoryAsync(product, skip ?? 0, take ?? 0, ct);
+        : await audit.HistoryAsync(product, skip ?? 0, take ?? 0, ct);
 
     // The API package's wire shape, not the store model: AuditAction comes out as a name, and the
     // response carries the page size actually served after the clamp.
@@ -333,9 +333,9 @@ app.MapPost("/api/stock-checks", async (AppDbContext db, RecordStockCheck body, 
 // Retention. The library never prunes on its own: there is no hosted service and no timer, because
 // the one irreversible thing it does should be something an application schedules.
 // ─────────────────────────────────────────────────────────────────────────────
-app.MapPost("/api/maintenance/prune", async (IAuditManager pruner, int? batchSize, CancellationToken ct) =>
+app.MapPost("/api/maintenance/prune", async (IAuditManager audit, int? batchSize, CancellationToken ct) =>
 {
-    var deleted = await pruner.PruneAsync(batchSize is > 0 ? batchSize.Value : 1000, ct);
+    var deleted = await audit.PruneAsync(batchSize is > 0 ? batchSize.Value : 1000, ct);
 
     // Honours both retentions at once: StockCheck's thirty days and the configured year for
     // everything else. A global sweep does not take the longer trail with it.
