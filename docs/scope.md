@@ -316,11 +316,19 @@ pruner — but it was legibility: "which code can write to the audit trail?" was
 reading constructors, and widening that privilege showed up in a diff as a signature change rather
 than as one line inside a method. Now it is a convention, held up by review.
 
-Three things keep standing, and they carry more weight for it:
+What keeps standing, and carries more weight for it:
 - `IAuditStore` has no update verb and never will (§3). An entry that can be edited is not an
   entry, whatever the service surface looks like.
-- The actor is stamped by the engine and cannot be passed by a caller (§5).
+- The entry's id and timestamp are the engine's. `AuditWrite` has no field for either, so no
+  caller backdates a row.
 - Nothing prunes on a timer (§9). Deletion is always something an application scheduled.
+
+**What does not stand, and is worth naming here rather than leaving to be found:** the actor is
+*not* the engine's last word. `AuditWrite.Actor` overrides the ambient accessor — deliberately, for
+a background job acting for a user or an import naming its source — so any code that can record can
+also name someone else as the one who acted. The fluent path cannot: `For(x).UpdatedAsync(…)` never
+sets it. But `RecordAsync` can, and on this branch every class holding `IAuditManager` has
+`RecordAsync`.
 
 **What was bought.** One name to learn instead of three, symmetry with the rest of the suite, and
 the end of the question that prompted this section — a developer arriving from `DotNetBoost.Media`
