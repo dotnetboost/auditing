@@ -256,14 +256,22 @@ products.MapPost("/discount", async (
     // is also exactly how a Dapper or MongoDB application records everything.
     var ids = affected.Select(p => p.Id).ToList();
 
+    // The Math.Round is not decoration. Price is decimal(18,2), so the database would round the
+    // product for itself and store 17.99 where the entry below said 17.991 — a trail that is wrong
+    // about the value it claims the row now holds, which is the one thing a trail must not be.
+    // Rounding in the statement and in the entry, by the same rule, is what keeps the two in
+    // agreement: ROUND() on all three engines is half away from zero, as MidpointRounding.AwayFromZero
+    // is.
     await db.Products
         .Where(p => ids.Contains(p.Id))
-        .ExecuteUpdateAsync(set => set.SetProperty(p => p.Price, p => p.Price * factor), ct);
+        .ExecuteUpdateAsync(set => set.SetProperty(p => p.Price, p => Math.Round(p.Price * factor, 2)), ct);
 
     foreach (var product in affected)
     {
+        var discounted = decimal.Round(product.Price * factor, 2, MidpointRounding.AwayFromZero);
+
         await audit.For(product).UpdatedAsync(
-            [new AuditChange(nameof(Product.Price), product.Price, product.Price * factor)],
+            [new AuditChange(nameof(Product.Price), product.Price, discounted)],
             metadata: $$"""{"reason":"bulk discount","percent":{{body.Percent}}}""",
             ct);
     }

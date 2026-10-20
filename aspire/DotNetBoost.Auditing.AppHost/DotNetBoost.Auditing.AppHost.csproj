@@ -18,10 +18,14 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" />
 
-    <!-- Container for the database holding the sample's tables and the trail. Only the integration
-         used by the *active* block in AppHost.cs is referenced; the commented-out block names the
-         package its alternative needs. -->
+    <!-- Container for the database holding the sample's tables and the trail — two databases on it,
+         one for the EF Core sample and one for the Dapper sample. Only the integration used by the
+         *active* block in AppHost.cs is referenced; the commented-out block names the package its
+         alternative needs. -->
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+
+    <!-- Not an alternative to PostgreSQL: it runs beside it, for samples/SampleApp.MongoDb. -->
+    <PackageReference Include="Aspire.Hosting.MongoDB" />
 
     <!-- Runs the Nuxt dashboard in clients/dashboard as an orchestrated resource. -->
     <PackageReference Include="Aspire.Hosting.JavaScript" />
@@ -31,8 +35,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The API host. IsAspireProjectResource makes the Aspire SDK emit Projects.SampleApp. -->
+    <!-- The API hosts. The Aspire SDK emits a Projects.* handle per reference — Projects.SampleApp,
+         Projects.SampleApp_Dapper, Projects.SampleApp_MongoDb — which is what AddProject<T>() in
+         AppHost.cs names. -->
     <ProjectReference Include="../../samples/SampleApp/SampleApp.csproj" />
+    <ProjectReference Include="../../samples/SampleApp.Dapper/SampleApp.Dapper.csproj" />
+    <ProjectReference Include="../../samples/SampleApp.MongoDb/SampleApp.MongoDb.csproj" />
   </ItemGroup>
 
 </Project>

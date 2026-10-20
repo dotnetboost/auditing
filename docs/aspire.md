@@ -1,7 +1,7 @@
 # Aspire
 
-`aspire/DotNetBoost.Auditing.AppHost` starts the whole stack with one command — the database, the
-sample API and the dashboard — and injects every address between them:
+`aspire/DotNetBoost.Auditing.AppHost` starts the whole stack with one command — two database
+engines, all three sample APIs and the dashboard — and injects every address between them:
 
 ```bash
 dotnet run --project aspire/DotNetBoost.Auditing.AppHost
@@ -12,28 +12,45 @@ No Aspire CLI is required: `AspireUseCliBundle` resolves the orchestrator and da
 
 | Resource | |
 |---|---|
-| `postgres` | PostgreSQL 16 with pgweb, on a **named volume** — a trail that vanished when the container stopped would demonstrate the opposite of the point |
-| `auditing` | The database holding the sample's tables **and** the trail |
-| `api` | `samples/SampleApp`, with a health check |
+| `postgres` | PostgreSQL with pgweb, on a **named volume** — a trail that vanished when the container stopped would demonstrate the opposite of the point |
+| `auditing` | The database holding the EF Core sample's tables **and** its trail |
+| `auditingdapper` | A second database on the same server, for the Dapper sample — so pgweb reaches both and the two schemas can be compared |
+| `mongo` | MongoDB with Mongo Express, on a named volume. A **standalone `mongod`**: transactions need a replica set |
+| `auditingmongo` | The database holding the MongoDB sample's documents **and** its trail |
+| `api` | `samples/SampleApp` — EF Core store, capture through the interceptor |
+| `dapper-api` | `samples/SampleApp.Dapper` — Dapper store, explicit recording, one transaction per request |
+| `mongo-api` | `samples/SampleApp.MongoDb` — MongoDB store, explicit recording, no transaction |
 | `dashboard` | `clients/dashboard` (Nuxt), with `npm install` run for you |
+
+Each API has a health check, and the dashboard waits for the one it is pointed at.
 
 ## One database, deliberately
 
-The trail lives in the same database as the sample's own tables, and that is the design rather than
-a convenience: it is what lets a change and its audit entry commit in one transaction. A separate
-audit database would be a second connection and a second commit — exactly the guarantee the EF Core
-store exists to provide. See [stores.md](stores.md).
+Each sample's trail lives in the same database as that sample's own data, and that is the design
+rather than a convenience: it is what lets a change and its audit entry commit in one transaction. A
+separate audit database would be a second connection and a second commit — exactly the guarantee the
+EF Core store exists to provide, and the one the Dapper sample buys back with a transaction. See
+[stores.md](stores.md).
 
-## Switching the store
+## All three stores at once
 
-Exactly one block is active in `AppHost.cs`. To move to SQL Server: comment the active block,
-uncomment the alternative, uncomment its `PackageReference` in the AppHost's project file, and flip
-the matching blocks in `samples/SampleApp/Program.cs` and `SampleApp.csproj`.
+The three APIs serve the same routes and the same bodies — the DTOs are literally the same files —
+over three stores, so the difference between them is something to click through rather than read
+about:
 
-**MongoDB is deliberately not offered.** The sample records through the EF Core interceptor, and the
-MongoDB and Dapper stores record *explicitly* — every change the sample makes by itself would have
-to be written out by hand, which would make it a different sample rather than a configuration of
-this one.
+| | `api` | `dapper-api` | `mongo-api` |
+|---|---|---|---|
+| Capture | The interceptor, from the change tracker | Every entry by hand | Every entry by hand |
+| Atomic with the change | By default | **With the transaction registered in `Program.cs`** | Not here — needs a session on a replica set |
+| `POST /api/products/{id}/fail` | Change and entry are already committed | **Neither** is committed | The change is; the entry was never asked for |
+
+That last row is the whole of [stores.md](stores.md) in three lines, and each one is a `curl` away.
+
+**Switching the EF Core sample's engine.** Exactly one block is active in `AppHost.cs`. To move to
+SQL Server: comment the active block, uncomment the alternative, uncomment its `PackageReference` in
+the AppHost's project file, and flip the matching blocks in `samples/SampleApp/Program.cs` and
+`SampleApp.csproj`. The Dapper sample switches the same way, through its connection factory — the
+store reads the dialect from the connection's runtime type.
 
 ## What the dashboard is given
 
@@ -43,6 +60,10 @@ NUXT_PUBLIC_API_REFERENCE_URL   → {api}/scalar
 NUXT_PUBLIC_MAX_PAGE_SIZE       → 200, matching AuditingOptions.MaxPageSize
 ```
 
-No identity is injected: the sample has no authentication and maps the audit endpoints with
+Swap `api` for `dapperApi` or `mongoApi` in that first line and the dashboard drives that API
+instead, with no change to the dashboard itself. It is worth doing once: it is the clearest evidence
+that the store is invisible from outside.
+
+No identity is injected: the samples have no authentication and map the audit endpoints with
 `RequireAuthorization = false`, so the dashboard's proxy sends the request as it stands. Against a
 real API that is where a token would be attached — see [dashboard.md](dashboard.md).

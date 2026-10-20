@@ -40,8 +40,9 @@ DotNetBoost package.
 > [testing.md](docs/testing.md), which also lists what is still not covered (concurrency, scale,
 > MySQL).
 
-> **Try it:** `dotnet run --project aspire/DotNetBoost.Auditing.AppHost` starts PostgreSQL, the
-> sample API and the dashboard together — see [aspire.md](docs/aspire.md). Nothing is on NuGet, and there is no sample application yet.
+> **Try it:** `dotnet run --project aspire/DotNetBoost.Auditing.AppHost` starts PostgreSQL,
+> MongoDB, **three sample APIs** — one per store, serving the same routes — and the dashboard
+> together; see [aspire.md](docs/aspire.md). Nothing is on NuGet yet.
 
 ---
 
@@ -80,19 +81,20 @@ the caller has none, so a failure still rolls the change back with its trail. As
 and creations join the single-save path. [limitations.md](docs/limitations.md) has the two cases
 that cannot be made atomic.
 
-**2. Explicitly, through `IAuditRecorder`** — for Dapper applications, and for anything a change
-tracker cannot see: a raw `ExecuteUpdate`, a stored procedure, a domain event.
+**2. Explicitly, through `IAuditRecorder`** — for Dapper and MongoDB applications, and for anything
+a change tracker cannot see: a raw `ExecuteUpdate`, a stored procedure, a domain event.
 
 ```csharp
 await audit.For(product).CreatedAsync([new AuditChange(nameof(Product.Name), null, "Widget")], ct);
 await audit.For("Product", "42").DeletedAsync(ct: ct);   // no instance needed
 ```
 
-The Dapper store writes when it is called rather than joining a unit of work, so **atomicity is
-yours to arrange**: hand it your transaction and the guarantee is the same as EF Core's. And
-**declare your entities** — everything there is addressed by name, so without
-`DeclareEntitiesFrom(assembly)` the engine has no type to read `[AuditRedact]` from and a secret is
-written down in full. [stores.md](docs/stores.md) covers both.
+The Dapper and MongoDB stores write when they are called rather than joining a unit of work, so
+**atomicity is yours to arrange**: hand the first your transaction, or the second a session, and the
+guarantee is the same as EF Core's. And **declare your entities** — everything there is addressed by
+name, so without `DeclareEntitiesFrom(assembly)` the engine has no type to read `[AuditRedact]` from
+and a secret is written down in full. [stores.md](docs/stores.md) covers both, and
+`samples/SampleApp.Dapper` and `samples/SampleApp.MongoDb` are that page as code you can `curl`.
 
 **3. From a sibling library** — `DotNetBoost.Settings` raises `ISettingWriteObserver` on every
 completed write, carrying everything an entry needs. Turning one into audit rows is about forty
@@ -217,6 +219,21 @@ entry to a media row or a translation row on `(EntityName, EntityId)`.
 | `DotNetBoost.Auditing.Dapper` | **Built.** Store only; SQL Server, PostgreSQL, SQLite |
 | `DotNetBoost.Auditing.MongoDb` | **Built.** One collection, changes embedded |
 | `DotNetBoost.Auditing.API` | **Built.** Minimal-API endpoints, `UseHttpContextActor()` |
+
+## The samples
+
+Three APIs, one per store, serving the **same routes over the same two entities** — the DTOs are
+literally the same files, so the dashboard can be pointed at any of them without a change. The
+AppHost starts all three.
+
+| | |
+|---|---|
+| [`samples/SampleApp`](samples/SampleApp/README.md) | EF Core. **No endpoint mentions auditing**: three attributes and two lines at startup are the whole of it |
+| [`samples/SampleApp.Dapper`](samples/SampleApp.Dapper/README.md) | Dapper. Every entry written by hand, the before-image from a `SELECT`, and one transaction per request that makes a change and its entry commit together |
+| [`samples/SampleApp.MongoDb`](samples/SampleApp.MongoDb/README.md) | MongoDB. The same explicit recording, an entry per document — and the atomicity window a standalone `mongod` leaves open, shown rather than hidden |
+
+The quickest way to feel the difference is `POST /api/products/{id}/fail` on each: the change and
+its entry are already committed, or neither is, or the change is and the trail is silent.
 
 ## Documentation
 

@@ -6,7 +6,8 @@ nothing in any endpoint.
 
 ## Running it
 
-The easy way is the Aspire AppHost, which starts PostgreSQL, this API and the dashboard together:
+The easy way is the Aspire AppHost, which starts PostgreSQL, MongoDB, this API, the two sibling
+samples and the dashboard together:
 
 ```bash
 dotnet run --project ../../aspire/DotNetBoost.Auditing.AppHost
@@ -53,11 +54,24 @@ curl -X POST localhost:5280/api/products \
 | `GET /api/products/{id}` | Bumps an `[AuditIgnore]` view counter. **Nothing is recorded** — otherwise every price change would be buried under page views |
 | `DELETE /api/products/{id}` | The row goes; **its trail does not**. Nothing cascades to the audit tables, so the `Deleted` entry with its final values is the only copy of what the row said |
 | `GET /api/products/{id}/history` | One entity's trail — and it still answers for a product that has been deleted |
-| `POST /api/products/discount` | A set-based `ExecuteUpdate` that the **change tracker never sees**, recorded explicitly through `IAuditRecorder`. This is also how a Dapper or MongoDB application records everything |
+| `POST /api/products/discount` | A set-based `ExecuteUpdate` that the **change tracker never sees**, recorded explicitly through `IAuditRecorder`. This is how a Dapper or MongoDB application records *everything* — see `samples/SampleApp.Dapper` |
 | `POST /api/products/{id}/fail` | Changes a price, saves, then throws — so you can see what the trail says afterwards. The comment explains the case that matters |
 | `POST /api/stock-checks` | A noisy entity with `[AuditRetention(Days = 30)]`, kept for a month rather than the configured year |
 | `POST /api/maintenance/prune` | Applies both retentions at once. The library never prunes on its own |
 | `GET /api/audit…` | The library's own endpoints. **Authorized by default** — turned off here (see above), with erasure and prune mapped because the sample exists to show them |
+
+## The same API over the other two stores
+
+[`samples/SampleApp.Dapper`](../SampleApp.Dapper/README.md) and
+[`samples/SampleApp.MongoDb`](../SampleApp.MongoDb/README.md) serve these same routes over the other
+two stores — the DTOs and `SystemActorAccessor.cs` are *this project's files*, compiled into theirs
+— so the dashboard can be pointed at any of the three without a change.
+
+What differs there is that **every entry is written by hand**, because neither store has a change
+tracker to read. The three `POST /api/products/{id}/fail` endpoints are the shortest way to see what
+that costs and what it does not: here the change and its entry are already committed; in the Dapper
+sample a transaction takes both back; in the MongoDB sample the price moves and the trail stays
+silent. [docs/stores.md](../../docs/stores.md) is the page on it.
 
 ## Two things to notice
 

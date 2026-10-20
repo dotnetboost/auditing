@@ -34,9 +34,10 @@
   </ItemGroup>
 
   <!--
-    The Dapper and MongoDB stores are alternatives too, and the sample does not show them: both
-    record EXPLICITLY, because neither has a change tracker to read. Everything below that happens
-    by itself would have to be written out by hand — which is the point docs/stores.md makes, and
-    not a thing a sample can demonstrate twice without becoming two samples.
+    The Dapper and MongoDB stores record EXPLICITLY, because neither has a change tracker to read:
+    everything that happens by itself here has to be written out by hand there. That is a different
+    sample rather than a configuration of this one, so each has its own —
+    samples/SampleApp.Dapper and samples/SampleApp.MongoDb, same routes and the same DTO files,
+    running beside this one under the AppHost.
   -->
 </Project>

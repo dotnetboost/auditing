@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- Pure JSON API: no wwwroot, so skip the static web assets manifest. -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <RootNamespace>SampleApp.Dapper</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Core/DotNetBoost.Auditing.Core.csproj" />
+    <!-- The store. This is the only line that differs from samples/SampleApp, which references
+         DotNetBoost.Auditing.EntityFrameworkCore here instead. -->
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Dapper/DotNetBoost.Auditing.Dapper.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.API/DotNetBoost.Auditing.API.csproj" />
+    <!-- OpenTelemetry, health checks, service discovery and resilient HttpClients. -->
+    <ProjectReference Include="../../aspire/DotNetBoost.Auditing.ServiceDefaults/DotNetBoost.Auditing.ServiceDefaults.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+  </ItemGroup>
+
+  <!--
+    Data access: Dapper over the raw ADO.NET driver. PostgreSQL here because the AppHost already
+    runs one for the EF Core sample and this sample takes a second database on it; the store detects
+    the dialect from the connection type, so switching to Microsoft.Data.SqlClient or
+    Microsoft.Data.Sqlite means changing the driver package and the factory in Program.cs, nothing
+    more. The DDL in Data/DbInitializer.cs is the only PostgreSQL-specific code in the sample — the
+    library's own DDL already covers all three dialects.
+  -->
+  <ItemGroup Label="Database — ACTIVE: PostgreSQL (raw driver + Dapper)">
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <!--
+    The response types and the actor accessor are the EF Core sample's OWN FILES, compiled into this
+    project rather than copied — the same arrangement samples/SampleApp.MongoDb uses, and for the
+    same reason: nothing about the wire contract depends on the store, so clients/dashboard can be
+    pointed at any of the three APIs without a change, and a contract that lived in three places
+    would drift. What differs between the samples is the data access and the capture, which are
+    local.
+  -->
+  <ItemGroup>
+    <Compile Include="../SampleApp/Dtos/*.cs" LinkBase="Dtos" />
+    <Compile Include="../SampleApp/SystemActorAccessor.cs" Link="SystemActorAccessor.cs" />
+  </ItemGroup>
+</Project>

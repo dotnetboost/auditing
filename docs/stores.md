@@ -6,7 +6,11 @@ by writing with one store and reading with the other. MongoDB is a different sha
 its section says why.
 
 What they do not share is *when a write becomes durable*, and that difference is the whole of the
-choice between them.
+choice between them. There is a sample per store, serving the same routes over the same two
+entities, so the difference is something to run rather than read: `samples/SampleApp`,
+[`samples/SampleApp.Dapper`](../samples/SampleApp.Dapper/README.md) and
+[`samples/SampleApp.MongoDb`](../samples/SampleApp.MongoDb/README.md), all three started together by
+[the AppHost](aspire.md).
 
 | | EF Core | Dapper | MongoDB |
 |---|---|---|---|
@@ -33,6 +37,9 @@ the whole opt-in. An update or delete is recorded inside the caller's own `SaveC
 batch and transaction. A creation with a store-generated key costs a second save, because its id
 does not exist until the INSERT has run; the interceptor opens a transaction around both when the
 caller has none. [limitations.md](limitations.md) has the two cases it cannot make atomic.
+
+`samples/SampleApp` is this store, and the thing to notice there is that no endpoint mentions
+auditing at all.
 
 ## Dapper
 
@@ -65,6 +72,12 @@ tx.Commit();
 
 Registering an `IDbTransaction` in the scope does the same thing for the container-resolved store.
 The EF Core store gets the guarantee for free; here it costs one transaction.
+
+[`samples/SampleApp.Dapper`](../samples/SampleApp.Dapper/README.md) is this store, with that
+registration in `Program.cs` and a `UnitOfWork` in the request scope — and a
+`POST /api/products/{id}/fail` endpoint that writes a change and its entry, throws, and leaves
+neither behind. Its `PUT` is the other half of what the explicit path costs: the before-image comes
+from a `SELECT`, because nothing else has one.
 
 **`DeclareEntitiesFrom` is not optional.** Everything is addressed by name and key, so the engine
 has no type to read `[AuditRedact]` from unless the assembly is declared — and undeclared, a
@@ -161,6 +174,13 @@ await session.CommitTransactionAsync(ct);
 A standalone `mongod` refuses to start a transaction, which is why this is opt-in rather than
 something the store arranges. Registering an `IClientSessionHandle` in the scope does the same thing
 for the container-resolved store.
+
+[`samples/SampleApp.MongoDb`](../samples/SampleApp.MongoDb/README.md) runs against the AppHost's
+standalone `mongod`, so it shows the window rather than hiding it: its
+`POST /api/products/{id}/fail` changes a price, commits it, and throws *before* recording, leaving a
+price that moved and a trail that says it did not. That is the explicit path's real failure mode —
+the thing the interceptor cannot forget and a hand-written call can — and its README has the
+one-node replica set that closes it.
 
 ### What the store does for itself, and why
 

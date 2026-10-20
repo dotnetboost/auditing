@@ -14,14 +14,14 @@ Start with the [README](../README.md). These pages go further.
 
 | | |
 |---|---|
-| [Stores](stores.md) | EF Core and Dapper — the same two tables, and the very different moment each becomes durable |
+| [Stores](stores.md) | EF Core, Dapper and MongoDB — the same two tables for the first two, and the very different moment each becomes durable. One sample per store |
 | [REST API](rest-api.md) | Every endpoint, the two security defaults that differ from the sibling packages, and every status code |
 
 ## Running it
 
 | | |
 |---|---|
-| [Aspire](aspire.md) | One command for the database, the API and the dashboard — and why the trail shares the application's database |
+| [Aspire](aspire.md) | One command for both database engines, all three sample APIs and the dashboard — and why each trail shares its application's database |
 | [Dashboard](dashboard.md) | The Nuxt client, and the four ways a trail viewer can quietly mislead |
 
 ## Still to write

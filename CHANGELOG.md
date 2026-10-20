@@ -169,17 +169,42 @@ MongoDB in containers.
   and nothing in any endpoint. Each endpoint demonstrates one thing — the deferred key on a
   creation, only-what-moved on an update, an `[AuditIgnore]` counter that records nothing, a trail
   that outlives the row it describes, and a set-based `ExecuteUpdate` the change tracker never sees
-  recorded explicitly through `IAuditRecorder`.
+  recorded explicitly through `IAuditRecorder` — rounded in the statement *and* in the entry, by the
+  same rule, so the recorded new value is exactly what the column ends up holding.
   - **No authentication and no authorization.** `SystemActorAccessor.cs` records every entry
     against `"system"`, and `MapAuditEndpoints` is opened with `RequireAuthorization = false`
     because its default is *on*. Both are documented as nothing to copy: a constant actor is a lie
     dressed as an answer in any application that has users — which is why the library's own default
     returns `null` — and the opt-out serves the whole trail to anyone who can reach the port.
-- **`aspire/`** — an AppHost that starts PostgreSQL, the API and the dashboard together and injects
-  every address, plus the shared ServiceDefaults. The trail lives in the **same** database as the
-  sample's own tables, which is the design rather than a convenience: it is what lets a change and
-  its entry commit in one transaction. MongoDB is deliberately not offered as an alternative there,
-  because that store records explicitly and the sample records through the interceptor.
+- **`samples/SampleApp.Dapper`** — the same API over the Dapper store. The same routes, the same
+  request and response bodies (literally the same DTO files) and the same two entities, so
+  `clients/dashboard` can be pointed at either; what differs is that **every entry is written by
+  hand**, because there is no change tracker to read.
+  - The before-image comes from a `SELECT` in the `PUT`, which is the other half of what the
+    explicit path costs: a blind `UPDATE` is one round trip cheaper and records nothing worth
+    reading.
+  - `Data/UnitOfWork.cs` puts an `IDbTransaction` in the request scope, which `UseDapper(...)`
+    resolves when it builds its store — so a row's `UPDATE` and its entry's `INSERT`s commit
+    together with nothing in the endpoints saying so. `POST /api/products/{id}/fail` writes both and
+    throws, and leaves **neither** behind.
+  - `DeclareEntitiesFrom` is not optional here, and the sample says why in three places: redaction
+    for writes addressed by name, `StockCheck`'s own retention for the pruner, and the discovery
+    endpoint the dashboard's model page reads.
+- **`samples/SampleApp.MongoDb`** — the same API again over the MongoDB store, with the same
+  explicit recording almost line for line: the explicit path costs the same whatever the engine.
+  - An entry is **one document** with its property changes embedded, so a single insert writes a
+    complete entry and a prune takes the changes with it.
+  - The atomicity window is **shown rather than hidden**. The AppHost runs a standalone `mongod`,
+    where a transaction is unavailable, so `POST /api/products/{id}/fail` changes a price, commits
+    it, and throws before recording — leaving a price that moved and a trail that says it did not.
+    That is the explicit path's real failure mode; the README has the one-node replica set and the
+    `WithSession` that close it.
+- **`aspire/`** — an AppHost that starts PostgreSQL, MongoDB, all three sample APIs and the
+  dashboard together and injects every address, plus the shared ServiceDefaults. Each sample's trail
+  lives in the **same** database as that sample's own data, which is the design rather than a
+  convenience: it is what lets a change and its entry commit in one transaction. The Dapper sample
+  takes a second database on the same PostgreSQL server, so pgweb reaches both and the two schemas
+  can be compared — they are identical, which is exactly the claim that store makes.
 - **`clients/dashboard`** — a Nuxt 4 trail browser: filter by entity, key, action, actor and window;
   page through; open an entry; read one product's history beside the product.
   - The audit endpoints require authorization, so the dashboard needs an identity — and
