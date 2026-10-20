@@ -57,8 +57,9 @@ const remove = async (product: Product) => {
     <template #body>
       <div class="space-y-4">
         <p class="text-sm text-muted">
-          The sample's own entity. Every change made here is captured by the interceptor — open a
-          product to see its history alongside it.
+          The sample's own entity. Every change made here is recorded — by the interceptor or by
+          hand, depending on which sample is behind this dashboard — so open a product to see its
+          history alongside it.
         </p>
 
         <UCard :ui="{ body: 'p-0 sm:p-0' }">

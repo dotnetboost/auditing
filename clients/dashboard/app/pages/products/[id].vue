@@ -78,9 +78,10 @@ const select = (entry: AuditEntry) => {
           </div>
 
           <p class="text-sm text-muted mt-3">
-            The entity is loaded before it is changed, so EF has a before-image and the trail records
-            only what moved. A detached <code>Update()</code> has none, and records every property
-            with no old values — see <code>docs/limitations.md</code>.
+            Only what actually moved is recorded, and that takes a before-image. The EF Core sample
+            reads one from its change tracker; the Dapper and MongoDB samples load the row first,
+            because nothing else has one. A write with no before-image records every property with
+            no old values — see <code>docs/limitations.md</code>.
           </p>
         </UCard>
 

@@ -81,10 +81,13 @@ const loading = computed(() => status.value === 'pending')
 
           <div class="prose prose-sm dark:prose-invert max-w-none">
             <p>
-              Every row here was written by an EF Core interceptor in
-              <code>samples/SampleApp</code>, inside the same <code>SaveChanges</code> as the change
-              it describes. Nothing in that application's endpoints mentions auditing: three
-              attributes on <code>Product</code> and two lines at startup are the whole of it.
+              Every row here was written by whichever sample this dashboard is pointed at, and there
+              is one per store. <code>samples/SampleApp</code> records from an EF Core interceptor,
+              inside the same <code>SaveChanges</code> as the change it describes, so nothing in its
+              endpoints mentions auditing at all; <code>samples/SampleApp.Dapper</code> and
+              <code>samples/SampleApp.MongoDb</code> write every entry by hand, because neither has
+              a change tracker to read. The declaration is the same either way: three attributes on
+              <code>Product</code>.
             </p>
             <p>
               Try it: change a product's price and watch one entry appear with one property in it.
