@@ -33,11 +33,12 @@ export function problemMessage(error: unknown): string {
     }
   }
 
-  // 401 is the one worth naming: the audit endpoints require authorization, so a dashboard that
-  // has not been given an identity sees this rather than an empty trail.
+  // 401 is the one worth naming: the audit endpoints require authorization by default, so a
+  // dashboard that has not been given an identity sees this rather than an empty trail. The sample
+  // turns that default off, so reaching this means the API is not the sample.
   if (statusOf(error) === 401) {
     return 'The API refused the request as unauthenticated. The audit endpoints require '
-      + 'authorization — check NUXT_DEMO_USER reaches the proxy.'
+      + 'authorization — the proxy in server/api/[...path].ts has to attach an identity.'
   }
 
   return (error as Error)?.message || 'The API could not be reached.'

@@ -2,7 +2,6 @@ using DotNetBoost.Auditing.API;
 using DotNetBoost.Auditing.Core;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Models;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using SampleApp;
 using SampleApp.Data;
@@ -51,19 +50,16 @@ builder.Services.AddAuditing(options =>
         options.DefaultPageSize = 50;
     })
     .UseEntityFrameworkCore<AppDbContext>()
-    // Records the signed-in user as the actor. The line that turns a change log into an audit trail.
-    .UseHttpContextActor()
+    // This sample has no authentication, so there is no signed-in user to record: every entry is
+    // attributed to "system". See SystemActorAccessor.cs — an application with users registers
+    // .UseHttpContextActor() here instead and gets the real actor from one claim.
+    .UseActorAccessor<SystemAuditActorAccessor>()
     // Needed because this sample records some changes BY NAME (see /api/products/discount): a write
     // addressed by hand has no type for the engine to read [AuditRedact] from unless the assembly
     // is declared. In an application that only ever uses the interceptor it is optional.
     .DeclareEntitiesFrom(typeof(Product).Assembly)
     .Build();
 
-builder.Services.AddAuthentication(DemoAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, DemoAuthenticationHandler>(
-        DemoAuthenticationHandler.SchemeName, null);
-
-builder.Services.AddAuthorization();
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 
@@ -78,9 +74,6 @@ using (var scope = app.Services.CreateScope())
 app.UseExceptionHandler();
 app.MapDefaultEndpoints();
 
-app.UseAuthentication();
-app.UseAuthorization();
-
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -89,13 +82,18 @@ if (app.Environment.IsDevelopment())
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The library's own endpoints: read the trail, and (opt-in) erase or prune it.
-//
-// Unlike the sibling libraries, these REQUIRE AUTHORIZATION by default — a trail says who changed
-// what, which is not data to serve anonymously. The demo scheme above authenticates anyone who
-// sends X-Demo-User, so any named caller can read it here.
 // ─────────────────────────────────────────────────────────────────────────────
 app.MapAuditEndpoints(options =>
 {
+    // Unlike the sibling libraries, these REQUIRE AUTHORIZATION by default — a trail says who
+    // changed what, which is not data to serve anonymously. This sample has no authentication, so
+    // the default has to be turned off explicitly or every read here answers 401.
+    //
+    // DO NOT COPY THIS LINE. It is one line in a sample with no users and no real data; in an
+    // application it serves the whole trail, and through its actors personal data about staff, to
+    // anyone who can reach the port.
+    options.RequireAuthorization = false;
+
     // Both off by default. On here because the sample exists to show them — in an application,
     // think twice: these delete history.
     options.MapErasure = true;

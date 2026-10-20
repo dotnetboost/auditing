@@ -47,14 +47,18 @@ mean that.
 
 ## The identity problem, and where it is solved
 
-The audit endpoints **require authorization**, unlike the sibling libraries'. So the dashboard
-cannot read anything without one, and where that identity lives matters: an identity shipped to the
-browser would let anyone with the page read the whole trail.
+The audit endpoints **require authorization**, unlike the sibling libraries'. So a dashboard cannot
+read anything without one, and where that identity lives matters: an identity shipped to the browser
+would let anyone with the page read the whole trail.
 
-`server/api/[...path].ts` proxies every `/api/**` call and attaches it **server-side**, from
-`NUXT_DEMO_USER`. The browser only ever talks to the dashboard's own origin — which also keeps the
-API free of CORS configuration. A real dashboard forwards the signed-in user's own token from that
-same handler.
+`server/api/[...path].ts` proxies every `/api/**` call, and that handler is the place for it. The
+browser only ever talks to the dashboard's own origin — which also keeps the API free of CORS
+configuration — so a token attached there never reaches the client. A real dashboard forwards the
+signed-in user's own from exactly that line.
+
+Against the sample it sends nothing, because the sample has no authentication and opens the audit
+endpoints with `RequireAuthorization = false`. That is a property of the sample, not of this
+dashboard, and not a shape to copy into one pointed at a real API.
 
 ## Five things the UI is careful about
 

@@ -67,9 +67,6 @@ builder.AddJavaScriptApp("dashboard", "../../clients/dashboard", "dev")
     // Consumed by server/api/[...path].ts, which proxies the browser's calls — so the dashboard
     // reaches the audit endpoints and the sample's product endpoints through one origin.
     .WithEnvironment("NUXT_AUDIT_API_URL", api.GetEndpoint("http"))
-    // The audit endpoints require authorization, and the sample authenticates whoever the
-    // X-Demo-User header names. The proxy sends this so the dashboard can read the trail at all.
-    .WithEnvironment("NUXT_DEMO_USER", "dashboard@example.com")
     // The sidebar's "API reference" link. Read in the browser, so it needs the public URL.
     .WithEnvironment("NUXT_PUBLIC_API_REFERENCE_URL",
         ReferenceExpression.Create($"{api.GetEndpoint("http")}/scalar"))

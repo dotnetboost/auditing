@@ -170,9 +170,11 @@ MongoDB in containers.
   creation, only-what-moved on an update, an `[AuditIgnore]` counter that records nothing, a trail
   that outlives the row it describes, and a set-based `ExecuteUpdate` the change tracker never sees
   recorded explicitly through `IAuditRecorder`.
-  - `DemoAuthentication.cs` signs the caller in from an `X-Demo-User` header. A stand-in, and
-    documented as nothing to copy — but without any authentication every entry's actor would be
-    honestly `null` and the sample would demonstrate a change log rather than an audit trail.
+  - **No authentication and no authorization.** `SystemActorAccessor.cs` records every entry
+    against `"system"`, and `MapAuditEndpoints` is opened with `RequireAuthorization = false`
+    because its default is *on*. Both are documented as nothing to copy: a constant actor is a lie
+    dressed as an answer in any application that has users — which is why the library's own default
+    returns `null` — and the opt-out serves the whole trail to anyone who can reach the port.
 - **`aspire/`** — an AppHost that starts PostgreSQL, the API and the dashboard together and injects
   every address, plus the shared ServiceDefaults. The trail lives in the **same** database as the
   sample's own tables, which is the design rather than a convenience: it is what lets a change and

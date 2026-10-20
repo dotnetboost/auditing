@@ -21,16 +21,26 @@ ConnectionStrings__auditing="Host=localhost;Database=auditing;Username=postgres;
 
 For no container at all, switch the SQLite block in `Program.cs` and `SampleApp.csproj`.
 
-## The actor
+## The actor, and the authorization
 
-`DemoAuthentication.cs` signs you in as whoever the `X-Demo-User` header names. It is a stand-in
-and nothing to copy — it exists because the actor is the point of an audit trail, and without any
-authentication every entry's actor would be honestly `null`. Send the header and the trail shows
-who did what:
+There is **no authentication and no authorization** here. Two consequences, both deliberate and
+neither worth copying:
+
+**Every entry is recorded against `"system"`.** `SystemActorAccessor.cs` is a one-line
+`IAuditActorAccessor` that says so. With no signed-in user to read it is the literal truth — the
+API changed its own catalogue and nobody asked it to — but in an application with users a constant
+actor is a lie dressed as an answer, which is why the library's own default returns `null` instead.
+A real application registers `UseHttpContextActor()` from `DotNetBoost.Auditing.API` and gets the
+real actor from one `NameIdentifier` claim.
+
+**`MapAuditEndpoints` is opened with `RequireAuthorization = false`.** Its default is *on*, unlike
+the sibling libraries', so without that line every read of the trail here would answer `401`. It is
+one line in a sample with no users and no real data; in an application it serves the whole trail,
+and through its actors personal data about staff, to anyone who can reach the port.
 
 ```bash
 curl -X POST localhost:5280/api/products \
-  -H 'Content-Type: application/json' -H 'X-Demo-User: alice@example.com' \
+  -H 'Content-Type: application/json' \
   -d '{"name":"Widget","price":24.99,"category":"tools","supplierCost":12.50}'
 ```
 
@@ -47,7 +57,7 @@ curl -X POST localhost:5280/api/products \
 | `POST /api/products/{id}/fail` | Changes a price, saves, then throws — so you can see what the trail says afterwards. The comment explains the case that matters |
 | `POST /api/stock-checks` | A noisy entity with `[AuditRetention(Days = 30)]`, kept for a month rather than the configured year |
 | `POST /api/maintenance/prune` | Applies both retentions at once. The library never prunes on its own |
-| `GET /api/audit…` | The library's own endpoints — **authorized by default**, with erasure and prune mapped here because the sample exists to show them |
+| `GET /api/audit…` | The library's own endpoints. **Authorized by default** — turned off here (see above), with erasure and prune mapped because the sample exists to show them |
 
 ## Two things to notice
 

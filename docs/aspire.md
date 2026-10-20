@@ -39,11 +39,10 @@ this one.
 
 ```
 NUXT_AUDIT_API_URL              → the api resource's http endpoint
-NUXT_DEMO_USER                  → dashboard@example.com
 NUXT_PUBLIC_API_REFERENCE_URL   → {api}/scalar
 NUXT_PUBLIC_MAX_PAGE_SIZE       → 200, matching AuditingOptions.MaxPageSize
 ```
 
-`NUXT_DEMO_USER` is there because the audit endpoints require authorization and the sample's demo
-scheme authenticates whoever it names. It is read server-side by the dashboard's proxy — see
-[dashboard.md](dashboard.md).
+No identity is injected: the sample has no authentication and maps the audit endpoints with
+`RequireAuthorization = false`, so the dashboard's proxy sends the request as it stands. Against a
+real API that is where a token would be attached — see [dashboard.md](dashboard.md).

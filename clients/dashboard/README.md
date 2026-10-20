@@ -26,10 +26,13 @@ npm run dev
 changed what and when, which is a map of an organisation's activity and, through the actor, personal
 data about its staff — so `MapAuditEndpoints()` is closed by default.
 
-That means this dashboard cannot read anything without an identity. `server/api/[...path].ts`
-attaches one **server-side**, from `NUXT_DEMO_USER`, and the browser never sees it: an identity
-shipped to the client would let anyone with the page read the whole trail. A real dashboard forwards
-the signed-in user's own token from that same handler.
+That means a dashboard cannot read anything without an identity, and `server/api/[...path].ts` is
+where it belongs: attached **server-side**, so the browser never sees it — an identity shipped to
+the client would let anyone with the page read the whole trail. A real dashboard forwards the
+signed-in user's own token from that handler.
+
+Against the sample it sends nothing, because the sample has no authentication and maps the audit
+endpoints with `RequireAuthorization = false`. That is the sample's doing, not this dashboard's.
 
 ## What the UI is careful about
 
