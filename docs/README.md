@@ -17,6 +17,7 @@ shortest version of what this library is and is not. These pages go further.
 |---|---|
 | [Stores](stores.md) | EF Core, Dapper and MongoDB — the same two tables for the first two, and the very different moment each becomes durable. One sample per store |
 | [REST API](rest-api.md) | Every endpoint, the two security defaults that differ from the sibling packages, and every status code |
+| [Configuration reference](configuration-reference.md) | Every builder method, every option on `AuditingOptions`, the attributes, and each store's own settings |
 
 ## Running it
 
@@ -33,14 +34,13 @@ entities, so the difference between them is only ever the store.
 
 ## Still to write
 
-These five follow the packages they describe, so they are listed here rather than left to be
+These four follow the packages they describe, so they are listed here rather than left to be
 discovered missing. None of them is a gap in what is documented, only in where: the material exists
 today in the sections on the right, which is also where the README's guide table points.
 
 | Planned page | | Until then |
 |---|---|---|
 | `architecture.md` | The engine, the store contract, and where the rules are applied | [scope.md §10](scope.md#10-one-manager-and-what-it-cost), and `IAuditStore`'s own XML docs |
-| `configuration-reference.md` | Every option on `AuditingOptions` and every builder method, in one table | The XML docs on `AuditingOptions` and `AuditingBuilderExtensions`, and the common ones in the [README](../README.md#what-else-it-can-do) |
 | `recording.md` | `IAuditManager.For(…)` in full, and the three capture sources | [scope.md §7](scope.md#7-how-changes-are-captured), [stores.md](stores.md) |
 | `querying.md` | The read verbs, the clamp, and the filters | [scope.md §8](scope.md#8-reading), [rest-api.md](rest-api.md#reading-a-page) |
 | `retention.md` | Pruning, per-entity retention, and the erasure path | [scope.md §9](scope.md#9-retention) |
