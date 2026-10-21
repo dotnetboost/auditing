@@ -160,9 +160,14 @@ public interface IAuditManager
     /// which reaches the audit table too.
     /// </summary>
     /// <param name="entity">The entity whose trail to erase.</param>
-    /// <param name="ct">Cancellation token.</param>
+    /// <param name="ct">Cancellation token. A cancelled erasure throws, having already deleted part of the trail; run it again to finish.</param>
     /// <returns>How many entries were deleted.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="entity"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// Erases the whole trail however long it is — the store batches internally and takes no batch
+    /// size, because an erasure that stopped half way and reported a count would read as a
+    /// successful one.
+    /// </remarks>
     Task<int> EraseForAsync(object entity, CancellationToken ct = default);
 
     /// <summary>
@@ -180,7 +185,11 @@ public interface IAuditManager
     /// in the trail both as the row that changed and as the name that changed it.
     /// </summary>
     /// <param name="actor">The actor, matched exactly.</param>
-    /// <param name="ct">Cancellation token.</param>
+    /// <param name="ct">Cancellation token. A cancelled erasure throws, having already deleted part of the trail; run it again to finish.</param>
     /// <returns>How many entries were deleted.</returns>
+    /// <remarks>
+    /// Usually the larger of the two erasures: one person's name is on far more entries than any
+    /// single row of theirs. Batched by the store, and complete when it returns.
+    /// </remarks>
     Task<int> EraseForActorAsync(string actor, CancellationToken ct = default);
 }

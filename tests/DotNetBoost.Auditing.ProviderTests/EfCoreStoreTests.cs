@@ -3,6 +3,7 @@ using DotNetBoost.Auditing.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using DotNetBoost.Auditing.EntityFrameworkCore;
+using System.Globalization;
 
 namespace DotNetBoost.Auditing.ProviderTests;
 
@@ -227,6 +228,45 @@ public class EfCoreStoreTests
 
         Assert.Equal(2, erased);
         Assert.Equal("bob", Assert.Single(await harness.EntriesAsync()).Actor);
+    }
+
+    [Fact]
+    public async Task Erasing_a_trail_past_the_parameter_ceiling_removes_all_of_it()
+    {
+        // SQLite's ceiling is 32,766 bound variables and SQL Server's is 2,100, and the ids of an
+        // erasure reach the DELETE through Contains, which some providers translate to one
+        // parameter per id. Unbatched, this threw rather than ran slowly — on the path a
+        // subject-access deletion request takes. The conformance suite covers the looping at a
+        // size every engine shares; this is the size that proves the ceiling, here rather than in
+        // the container suite so it guards without Docker.
+        using var harness = new EfCoreHarness();
+
+        const int count = 40_000;
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            for (var i = 0; i < count; i++)
+            {
+                db.Set<AuditEntry>().Add(new AuditEntry
+                {
+                    Id            = Guid.NewGuid(),
+                    EntityName    = "Product",
+                    EntityId      = i.ToString(CultureInfo.InvariantCulture),
+                    Action        = AuditAction.Created,
+                    Actor         = "alice",
+                    CorrelationId = "bulk",
+                    OccurredAt    = DateTime.UtcNow
+                });
+            }
+
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Equal(count, await harness.InScopeAsync((_, sp) =>
+            sp.GetRequiredService<IAuditManager>().EraseForActorAsync("alice")));
+
+        await harness.InScopeAsync(async (db, _) =>
+            Assert.Equal(0, await db.Set<AuditEntry>().CountAsync()));
     }
 
     [Fact]

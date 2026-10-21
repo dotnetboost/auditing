@@ -132,6 +132,98 @@ public class DapperPruneTests
     }
 
     [Fact]
+    public async Task A_prune_batch_past_the_parameter_ceiling_deletes_the_whole_batch()
+    {
+        // The batch size is the caller's — the REST prune endpoint takes one from the request body —
+        // and this one is past SQLite's ceiling of 32,766 bound variables. The DELETE goes round as
+        // many times as the dialect needs; the batch is honoured and reported in full, because a
+        // short return is how the pruner is told the backlog is clear. Clamping the batch instead
+        // would stop the drain after one round with entries still past their retention.
+        using var harness = new DapperHarness();
+
+        const int count = 40_000;
+
+        await harness.InScopeAsync(async sp =>
+        {
+            var entries = new List<AuditEntry>(count);
+            var when    = DateTime.UtcNow.AddDays(-90);
+
+            for (var i = 0; i < count; i++)
+            {
+                var entry = new AuditEntry
+                {
+                    Id            = Guid.NewGuid(),
+                    EntityName    = "Product",
+                    EntityId      = i.ToString(CultureInfo.InvariantCulture),
+                    Action        = AuditAction.Created,
+                    Actor         = "alice",
+                    CorrelationId = "bulk",
+                    OccurredAt    = when
+                };
+
+                entry.Changes.Add(new AuditPropertyChange
+                {
+                    AuditEntryId = entry.Id,
+                    PropertyName = "Name",
+                    NewValue     = "x"
+                });
+
+                entries.Add(entry);
+            }
+
+            await sp.GetRequiredService<IAuditStore>().AppendRangeAsync(entries);
+        });
+
+        var deleted = await harness.InScopeAsync(sp => sp.GetRequiredService<IAuditStore>()
+            .DeleteOlderThanAsync(DateTime.UtcNow, AuditPruneScope.All, count));
+
+        Assert.Equal(count, deleted);
+        Assert.Equal(0, await CountAsync(harness, "AuditEntries"));
+
+        // The children went with them, a group at a time, with no orphan left by a partial pass.
+        Assert.Equal(0, await CountAsync(harness, "AuditPropertyChanges"));
+    }
+
+    [Fact]
+    public async Task Erasing_a_trail_past_the_parameter_ceiling_removes_all_of_it()
+    {
+        // SQLite's ceiling is 32,766 bound variables and SQL Server's is 2,100, and the ids of an
+        // erasure go into the DELETE as an IN list. Unbatched, this threw rather than ran slowly —
+        // on the path a subject-access deletion request takes. The conformance suite covers the
+        // looping at a size every engine shares; this is the size that proves the ceiling, here
+        // rather than in the container suite so it guards without Docker.
+        using var harness = new DapperHarness();
+
+        const int count = 40_000;
+
+        await harness.InScopeAsync(async sp =>
+        {
+            var entries = new List<AuditEntry>(count);
+
+            for (var i = 0; i < count; i++)
+            {
+                entries.Add(new AuditEntry
+                {
+                    Id            = Guid.NewGuid(),
+                    EntityName    = "Product",
+                    EntityId      = i.ToString(CultureInfo.InvariantCulture),
+                    Action        = AuditAction.Created,
+                    Actor         = "alice",
+                    CorrelationId = "bulk",
+                    OccurredAt    = DateTime.UtcNow
+                });
+            }
+
+            await sp.GetRequiredService<IAuditStore>().AppendRangeAsync(entries);
+        });
+
+        Assert.Equal(count, await harness.InScopeAsync(sp =>
+            sp.GetRequiredService<IAuditManager>().EraseForActorAsync("alice")));
+
+        Assert.Equal(0, await CountAsync(harness, "AuditEntries"));
+    }
+
+    [Fact]
     public async Task Erasing_a_trail_that_is_not_there_deletes_nothing()
     {
         using var harness = new DapperHarness();

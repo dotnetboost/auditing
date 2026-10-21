@@ -53,11 +53,13 @@ internal sealed class AuditStatements
 
         SelectIdsOlderThan = $"SELECT {C("Id")} FROM {EntriesTable} WHERE {C("OccurredAt")} < @Cutoff ";
 
+        // Both end with a space, like SelectIdsOlderThan: an erasure is batched too, so each of
+        // these is composed with an ORDER BY and a LIMIT rather than issued as it stands.
         SelectIdsForEntity =
             $"SELECT {C("Id")} FROM {EntriesTable} " +
-            $"WHERE {C("EntityName")} = @EntityName AND {C("EntityId")} = @EntityId";
+            $"WHERE {C("EntityName")} = @EntityName AND {C("EntityId")} = @EntityId ";
 
-        SelectIdsForActor = $"SELECT {C("Id")} FROM {EntriesTable} WHERE {C("Actor")} = @Actor";
+        SelectIdsForActor = $"SELECT {C("Id")} FROM {EntriesTable} WHERE {C("Actor")} = @Actor ";
 
         DeleteChangesByEntryIds = $"DELETE FROM {ChangesTable} WHERE {AnyOf(dialect, C("AuditEntryId"), "@Ids")}";
         DeleteEntriesByIds      = $"DELETE FROM {EntriesTable} WHERE {AnyOf(dialect, C("Id"), "@Ids")}";
@@ -90,6 +92,32 @@ internal sealed class AuditStatements
 
     /// <summary>A column name, quoted for the dialect.</summary>
     internal string Column(string column) => Quote(Dialect, column);
+
+    /// <summary>
+    /// The most ids one statement may carry on this dialect.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is a limit on the statement, not on the batch.</b> A prune's <c>batchSize</c> comes
+    /// from the caller and <c>IAuditStore.DeleteOlderThanAsync</c> promises that a return of
+    /// fewer than it means the backlog is clear — so lowering the batch to fit the statement would
+    /// make the pruner stop after one round with entries still past their retention, which is a
+    /// silent under-delete and worse than the throw it would be avoiding. The batch is honoured in
+    /// full; it is the DELETE that goes round more than once.
+    /// </remarks>
+    internal int MaxIdsPerStatement => MaxIdsPerStatementFor(Dialect);
+
+    /// <inheritdoc cref="MaxIdsPerStatement"/>
+    internal static int MaxIdsPerStatementFor(SqlDialect dialect) => dialect switch
+    {
+        // = ANY(@Ids) sends the whole array as one parameter, so there is no list to split and
+        // splitting it would only cost round trips.
+        SqlDialect.PostgreSql => int.MaxValue,
+
+        // Dapper expands IN @Ids into one parameter per id, against ceilings of 2,100 on SQL Server
+        // and 32,766 on SQLite. A thousand clears the lower of the two with room to spare, and is
+        // the batch the erasure path drains in for the same reason.
+        _ => 1000
+    };
 
     /// <summary>
     /// A predicate matching <paramref name="column"/> against a set of values, spelled for the

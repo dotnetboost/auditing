@@ -35,6 +35,18 @@ public sealed class DapperAuditStore(
     DapperOptions options,
     IDbTransaction? transaction = null) : IAuditStore
 {
+    /// <summary>
+    /// How many entries an erasure deletes per round trip.
+    /// <para>
+    /// Not configurable, and not taken from the prune's <c>batchSize</c>: the erasure verbs on
+    /// <see cref="IAuditStore"/> deliberately have no batch parameter, because how a store keeps
+    /// within its engine's limits is the store's business rather than the caller's. A thousand is
+    /// the prune's default and is comfortably under the lowest ceiling the <c>IN</c> list has to
+    /// clear — SQL Server's 2,100 parameters.
+    /// </para>
+    /// </summary>
+    private const int EraseBatchSize = 1000;
+
     private readonly IDbConnection _connection = connection ?? throw new ArgumentNullException(nameof(connection));
     private readonly DapperOptions _options = options ?? throw new ArgumentNullException(nameof(options));
 
@@ -235,66 +247,145 @@ public sealed class DapperAuditStore(
     }
 
     /// <inheritdoc/>
-    public async Task<int> DeleteForEntityAsync(string entityName, string entityId, CancellationToken ct = default)
+    public Task<int> DeleteForEntityAsync(string entityName, string entityId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entityName);
         ArgumentException.ThrowIfNullOrWhiteSpace(entityId);
 
         var sql = Sql;
 
-        return await UnitOfWork.RunAsync(_connection, async () =>
-        {
-            var ids = (await _connection.QueryAsync<AuditRows.IdRow>(
-                new CommandDefinition(
-                    sql.SelectIdsForEntity,
-                    new { EntityName = entityName, EntityId = entityId },
-                    transaction,
-                    cancellationToken: ct))
-                .ConfigureAwait(false))
-                .Select(r => AuditRows.ToGuid(r.Id))
-                .ToArray();
-
-            return ids.Length == 0 ? 0 : await DeleteByIdAsync(sql, ids, ct).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+        return EraseAsync(
+            sql,
+            sql.SelectIdsForEntity,
+            new { EntityName = entityName, EntityId = entityId },
+            ct);
     }
 
     /// <inheritdoc/>
-    public async Task<int> DeleteForActorAsync(string actor, CancellationToken ct = default)
+    public Task<int> DeleteForActorAsync(string actor, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
 
         var sql = Sql;
 
+        return EraseAsync(sql, sql.SelectIdsForActor, new { Actor = actor }, ct);
+    }
+
+    /// <summary>
+    /// Deletes every entry <paramref name="selectIds"/> matches, a batch at a time, and reports the
+    /// total.
+    /// </summary>
+    /// <remarks>
+    /// Batched for the reason the prune is — a trail that has been collecting for a year is a
+    /// delete of millions of rows, and one statement would hold locks across the table that
+    /// recording needs — and for one more that is fatal rather than merely slow: the ids go into
+    /// the DELETE as an <c>IN</c> list, which Dapper expands to one parameter per id on SQL Server
+    /// and SQLite. Unbatched, erasing a trail of more than a couple of thousand entries does not
+    /// run slowly, it throws.
+    /// <para>
+    /// The whole drain runs inside one <see cref="UnitOfWork.RunAsync"/>, so a connection the store
+    /// had to open is opened once rather than per batch.
+    /// </para>
+    /// <para>
+    /// A cancelled erasure throws, having deleted whole batches. It is not rolled back — that would
+    /// mean holding a transaction across the sweep, which is what batching exists to avoid — and
+    /// the work is idempotent, so running it again erases what is left.
+    /// </para>
+    /// </remarks>
+    private async Task<int> EraseAsync(
+        AuditStatements sql,
+        string selectIds,
+        object parameters,
+        CancellationToken ct)
+    {
+        // Oldest first and bounded, exactly as the prune selects its batch. The ORDER BY is not
+        // decoration: SQL Server's OFFSET/FETCH is only legal after one, and both erasure filters
+        // lead an index that ends on OccurredAt, so it is served by the index rather than sorted.
+        var select = $"{selectIds}{sql.OldestFirst}{AuditStatements.Limit(sql.Dialect, EraseBatchSize)}";
+
         return await UnitOfWork.RunAsync(_connection, async () =>
         {
-            var ids = (await _connection.QueryAsync<AuditRows.IdRow>(
-                new CommandDefinition(sql.SelectIdsForActor, new { Actor = actor }, transaction, cancellationToken: ct))
-                .ConfigureAwait(false))
-                .Select(r => AuditRows.ToGuid(r.Id))
-                .ToArray();
+            var total = 0;
 
-            return ids.Length == 0 ? 0 : await DeleteByIdAsync(sql, ids, ct).ConfigureAwait(false);
+            while (true)
+            {
+                var ids = (await _connection.QueryAsync<AuditRows.IdRow>(
+                    new CommandDefinition(select, parameters, transaction, cancellationToken: ct))
+                    .ConfigureAwait(false))
+                    .Select(r => AuditRows.ToGuid(r.Id))
+                    .ToArray();
+
+                if (ids.Length == 0)
+                    return total;
+
+                total += await DeleteByIdAsync(sql, ids, ct).ConfigureAwait(false);
+
+                // Short of a full batch is the store saying that was the last of them, so the next
+                // SELECT would come back empty. Saves a round trip on every erasure small enough to
+                // fit in one batch, which is nearly all of them.
+                if (ids.Length < EraseBatchSize)
+                    return total;
+            }
         }, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Deletes the property rows and then the entries.
+    /// Deletes the property rows and then the entries, <see cref="AuditStatements.MaxIdsPerStatement"/>
+    /// at a time, and reports how many entries went.
     /// </summary>
     /// <remarks>
     /// The children are deleted explicitly rather than left to the cascade the DDL declares: a
     /// cascade only fires if the database is enforcing foreign keys, which SQLite does not do unless
     /// it was asked to, and an orphaned property row is invisible — nothing reads it and nothing
-    /// ever cleans it up.
+    /// ever cleans it up. Each pass deletes one group's children before its entries, so a group is
+    /// self-contained and no pass can leave an orphan behind.
+    /// <para>
+    /// <b>The grouping is the statement's limit, not the caller's.</b> Every id handed here is
+    /// deleted and counted, however many there are — a prune's <c>batchSize</c> is the caller's to
+    /// choose and the drain loop reads a short return as "the backlog is clear". All that changes
+    /// is how many statements it takes, which is what keeps an <c>IN</c> list inside the dialect's
+    /// parameter ceiling.
+    /// </para>
     /// </remarks>
     private async Task<int> DeleteByIdAsync(AuditStatements sql, Guid[] ids, CancellationToken ct)
     {
-        await _connection.ExecuteAsync(
-            new CommandDefinition(sql.DeleteChangesByEntryIds, new { Ids = ids }, transaction, cancellationToken: ct))
-            .ConfigureAwait(false);
+        var deleted = 0;
 
-        return await _connection.ExecuteAsync(
-            new CommandDefinition(sql.DeleteEntriesByIds, new { Ids = ids }, transaction, cancellationToken: ct))
-            .ConfigureAwait(false);
+        foreach (var group in Grouped(ids, sql.MaxIdsPerStatement))
+        {
+            await _connection.ExecuteAsync(
+                new CommandDefinition(sql.DeleteChangesByEntryIds, new { Ids = group }, transaction, cancellationToken: ct))
+                .ConfigureAwait(false);
+
+            deleted += await _connection.ExecuteAsync(
+                new CommandDefinition(sql.DeleteEntriesByIds, new { Ids = group }, transaction, cancellationToken: ct))
+                .ConfigureAwait(false);
+        }
+
+        return deleted;
+    }
+
+    /// <summary>
+    /// <paramref name="ids"/> in groups of at most <paramref name="size"/>, and as itself when it
+    /// already fits — which is every prune and erasure of an ordinary size, and the case worth not
+    /// copying an array for.
+    /// </summary>
+    /// <remarks>
+    /// The early return is also what makes the loop safe for a <paramref name="size"/> of
+    /// <see cref="int.MaxValue"/>, which is what PostgreSQL asks for: the loop is only ever entered
+    /// when <paramref name="size"/> is smaller than an array's length, so its arithmetic cannot
+    /// overflow.
+    /// </remarks>
+    private static IEnumerable<Guid[]> Grouped(Guid[] ids, int size)
+    {
+        if (ids.Length <= size)
+        {
+            yield return ids;
+            yield break;
+        }
+
+        for (var start = 0; start < ids.Length; start += size)
+            yield return ids[start..Math.Min(start + size, ids.Length)];
     }
 
     /// <summary>

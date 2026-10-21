@@ -440,6 +440,37 @@ public abstract class StoreConformance : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_batch_too_large_for_one_statement_is_still_one_batch()
+    {
+        // Past SQL Server's 2,100-parameter ceiling, which a store that deletes by a list of ids
+        // runs into. A batch size is the caller's to choose, so what is asserted here is that the
+        // whole of it goes in this one call and is reported: returning less would tell the pruner
+        // the backlog was clear and leave entries sitting past their retention.
+        const int count = 2_500;
+
+        var entries = new List<AuditEntry>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var entry = Entry(entityId: i.ToString(CultureInfo.InvariantCulture), occurredAt: Base);
+
+            var change = Change();
+            change.AuditEntryId = entry.Id;
+            entry.Changes.Add(change);
+
+            entries.Add(entry);
+        }
+
+        await Store.AppendRangeAsync(entries);
+        await FlushAsync();
+
+        Assert.Equal(count, await Store.DeleteOlderThanAsync(Base.AddHours(1), AuditPruneScope.All, count));
+
+        Assert.Empty((await Store.QueryAsync(new AuditQuery { Take = 10 })).Entries);
+        Assert.Equal(0, await CountChangesAsync());
+    }
+
+    [Fact]
     public async Task Erasing_one_entity_leaves_the_others()
     {
         await SeedAsync();
@@ -461,6 +492,44 @@ public abstract class StoreConformance : IAsyncLifetime
         var left = await Store.QueryAsync(new AuditQuery { Take = 10 });
         Assert.Equal(2, left.Entries.Count);
         Assert.DoesNotContain(left.Entries, e => e.Actor == "alice");
+    }
+
+    [Fact]
+    public async Task Erasing_a_trail_larger_than_one_batch_removes_all_of_it()
+    {
+        // Past the point where a store that deletes by a list of ids has to go round more than
+        // once, and past SQL Server's 2,100-parameter ceiling — which is what an unbatched erasure
+        // used to hit, as a throw rather than a slow delete. Erasure takes no batch size, so
+        // "however many there are" is the contract being asserted here.
+        const int count = 2_500;
+
+        var entries = new List<AuditEntry>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var entry = Entry(
+                entityId: i.ToString(CultureInfo.InvariantCulture),
+                actor: "leaver@example.com",
+                correlationId: "bulk",
+                occurredAt: Base.AddSeconds(i));
+
+            var change = Change();
+            change.AuditEntryId = entry.Id;
+            entry.Changes.Add(change);
+
+            entries.Add(entry);
+        }
+
+        await Store.AppendRangeAsync(entries);
+        await FlushAsync();
+
+        Assert.Equal(count, await Store.DeleteForActorAsync("leaver@example.com"));
+
+        Assert.Empty((await Store.QueryAsync(new AuditQuery { Take = 10 })).Entries);
+
+        // And the property rows went with them. An orphan at this scale is the same bug as an
+        // orphan at three, but it is only reachable once the delete has to loop.
+        Assert.Equal(0, await CountChangesAsync());
     }
 
     [Fact]

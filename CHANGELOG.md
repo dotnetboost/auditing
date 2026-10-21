@@ -5,8 +5,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 388 tests on net8.0 and
-net10.0 needing nothing installed, plus 168 integration tests against PostgreSQL, SQL Server and
+The first work on the library. All five packages are built and tested: 397 tests on net8.0 and
+net10.0 needing nothing installed, plus 178 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
 ### Added
@@ -39,6 +39,27 @@ MongoDB in containers.
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the
   exclusion, a per-entity retention would be silently the opposite of what it says.
+
+- **Erasure is batched in both relational stores**, like the prune already was. The ids of an
+  erasure go into the DELETE as an `IN` list, which Dapper expands to one parameter per id and
+  EF Core may translate the same way — so an unbatched erasure of a long trail did not run slowly,
+  it threw: SQL Server at 2,100 entries, SQLite at 32,766. On the path a subject-access deletion
+  request takes, which is the worst place for a size limit nobody wrote down. Erasure still takes
+  no batch size and is complete when it returns, because an erasure that stopped half way and
+  reported a count would read as a successful one; the store keeps itself within its engine's
+  limits because that is the store's business and not the caller's. A cancelled erasure throws
+  having deleted whole batches, and is safe to run again. Guarded at both levels: the conformance
+  suite erases a trail of 2,500 across every store and engine, past SQL Server's ceiling, and each
+  relational store has a test over 40,000 that fails without the fix and needs no Docker.
+
+- **A prune's `batchSize` is honoured whatever the dialect's parameter ceiling.** The Dapper store
+  groups its DELETE by what one statement can carry — every id on PostgreSQL, where `= ANY(@Ids)`
+  is a single parameter, a thousand at a time elsewhere — rather than lowering the batch to fit.
+  The batch is the caller's to choose, and `DeleteOlderThanAsync` promising that a short return
+  means the backlog is clear is what the drain loop reads: clamping the batch would have stopped a
+  prune after one round with entries still past their retention, which is a silent under-delete and
+  worse than the throw it would be avoiding. The REST prune endpoint takes a batch size from the
+  request body, so this was reachable from outside.
 
 - **`DotNetBoost.Auditing.EntityFrameworkCore`** — the capture and the store.
   - A `SaveChangesInterceptor` that records `Modified` and `Deleted` entities **in the caller's own
@@ -140,7 +161,7 @@ MongoDB in containers.
   which is also one parameter rather than one per id and so has no 2100-parameter ceiling.
 
 ### Added — testing
-- **`DotNetBoost.Auditing.IntegrationTests`** — 168 tests against **PostgreSQL 16, SQL Server 2022
+- **`DotNetBoost.Auditing.IntegrationTests`** — 178 tests against **PostgreSQL 16, SQL Server 2022
   and MongoDB 7 (as a replica set)** in Testcontainers.
   - A **conformance suite**: one set of contract tests inherited once per store and engine, so all
     five combinations are shown answering the same questions the same way. The one place the stores

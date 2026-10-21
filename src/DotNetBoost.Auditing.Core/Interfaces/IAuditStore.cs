@@ -82,6 +82,17 @@ public interface IAuditStore
     /// <param name="entityId">The entity's stored key.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>How many entries were deleted.</returns>
+    /// <remarks>
+    /// <b>Unlike the prune, this takes no batch size and deletes everything it matches</b> — an
+    /// erasure that stopped half way would be a compliance problem rather than a slow query. How
+    /// that is kept within the engine's limits is the store's business: a store that deletes by a
+    /// list of ids has to batch internally, because a trail of a few thousand entries is past the
+    /// parameter ceiling on some engines, and that is a throw rather than a slow delete.
+    /// <para>
+    /// A cancelled erasure may have deleted whole batches already. The work is idempotent, so the
+    /// remedy is to run it again rather than to assume either outcome.
+    /// </para>
+    /// </remarks>
     Task<int> DeleteForEntityAsync(string entityName, string entityId, CancellationToken ct = default);
 
     /// <summary>
@@ -92,5 +103,10 @@ public interface IAuditStore
     /// <param name="actor">The actor, matched exactly.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>How many entries were deleted.</returns>
+    /// <remarks>
+    /// Batched internally and complete when it returns, exactly as
+    /// <see cref="DeleteForEntityAsync"/> is — and the larger of the two in practice, since one
+    /// person's name is on far more entries than any one row of theirs.
+    /// </remarks>
     Task<int> DeleteForActorAsync(string actor, CancellationToken ct = default);
 }

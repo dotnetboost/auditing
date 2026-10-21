@@ -222,3 +222,16 @@ caller's fault would hide a fault the operator needs to see as a `500`.
 
 An erasure of a trail that is not there is `200` with `"deleted": 0`. An entity with no trail and
 one that never existed are the same observation, and "nothing to erase" is a successful erasure.
+
+An erasure of a **large** trail is batched inside the store and complete when the `200` arrives —
+there is no page size to pass and no second call to make. The one thing to know: if the client
+disconnects partway, the request's cancellation token fires and the erasure stops having already
+deleted whole batches. Nothing is rolled back, because holding a transaction across the sweep is
+what batching exists to avoid, and the work is idempotent — so the remedy is to call it again
+rather than to assume either outcome. Deletion is the one irreversible thing here, so it is worth
+reading `"deleted"` rather than only the status code.
+
+`POST /prune` takes a `batchSize` and honours it whatever its size: the store groups its own
+statements to stay inside the engine's limits rather than quietly lowering the batch, because a
+lowered batch would read to the pruner as "nothing left to delete" and leave entries past their
+retention. Pick it for how long you are willing to hold locks, not to work around a ceiling.
