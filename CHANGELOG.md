@@ -242,6 +242,48 @@ MongoDB in containers.
     `UpdatedAsync(changes, ct)` does not compile at all — the second positional parameter is
     `metadata` — so every explicit call now passes `ct: ct`.
 
+- **`docs/configuration-reference.md`** — every builder method, every option on
+  `AuditingOptions` with its default, the attributes, each store's own options, `AuditEndpointOptions`
+  and what `Build()` refuses. It was written because eight builder methods and four options had no
+  page at all: `WithRetention`, `WithPageSize`, `WithMaxValueLength`,
+  `WithoutCreatedAndDeletedValues`, `DisableRecording`, `UseActorAccessor`, `UseEntityKeyAccessor`
+  and `UseCustomStore`, and `Enabled`, `RecordCreatedValues`, `RecordDeletedValues` and
+  `DefaultPageSize`. The security defaults that differ from the sibling packages carry their reason
+  in the table, and `DestructivePolicy` says it is required *on top of* `Policy`.
+- **`docs/architecture.md`** — the layer diagram, the engine's three internal classes, and the
+  things that were in the code and nowhere else: that every rule is applied in `AuditRecorder` so no
+  capture source can forget one, that `IAuditStore` is deliberately dumb and has **no update verb**,
+  that `DeleteOlderThanAsync` takes an `AuditPruneScope` because a longer per-entity retention must
+  be excluded from the global sweep rather than caught by it, and that durability — the one
+  difference the store contract cannot hide — is a `FlushAsync` hook in the conformance suite rather
+  than behaviour left unwritten. Plus each package's real dependency set, the repository layout and
+  how the suites are run.
+  - Both pages were checked against the tree rather than written from memory: every member named
+    resolves in `src/`, every stated default matches its field initialiser, the store has exactly
+    seven verbs, and every path in the layout tree exists.
+  - `scope.md` §§1–3 and §10 stay where they are, though an architecture page would otherwise take
+    them. Those section numbers are cited from the docs index, the README, this file and
+    `IAuditManager`'s XML docs, so renumbering would break a dozen references to buy a tidier split.
+- **The docs index no longer advertises holes that are not there.** Its "Still to write" table
+  listed pages with nothing beside them, so a reader looking for redaction, retention, recording or
+  the read verbs was told the page does not exist — when each is written, in `scope.md` §§6–9. Every
+  planned page now names where to read that material today. The three sample READMEs it links were
+  missing from it.
+- **The three sample READMEs are on one skeleton**, the one the sibling libraries' samples use, so a
+  reader who has read one knows where to look in the next. `SampleApp` had no "trying it" section at
+  all and a `curl` block orphaned inside its authorization section; that is now the start of a tour
+  which was **run** against a throwaway PostgreSQL and says what came back, and the security caveat
+  moved to the end where the siblings keep theirs. The Dapper page promised "two things" and listed
+  three; the MongoDB page's four sections became one, keeping Atomicity on its own because it is why
+  that sample exists. Both claimed the shared DTOs are compiled into "both projects" — the csproj
+  files link them into all three.
+
+With these two pages the documentation set matches the suite's. `architecture.md`,
+`configuration-reference.md`, `aspire.md`, `dashboard.md` and `rest-api.md` are in all three sibling
+libraries and `limitations.md` in two of them. `scope.md`, `stores.md` and `testing.md` have no
+counterpart there, deliberately — `stores.md` is named for what the API calls them (`IAuditStore`,
+`UseCustomStore`), and the other two carry material the siblings never had to write down.
+
 ### Notes
 - The library depends on no other DotNetBoost package and names none of them. Composition with
   Settings, Media and MultiLingual is application code, worked out in `dotnetboost-sample`.
