@@ -223,6 +223,25 @@ MongoDB in containers.
     (withheld on purpose), a `null` (never stored), and `total: null` (not counted, which is not
     zero — paging falls back to "there might be more").
 
+### Documentation
+- **The README opens with a runnable quick start.** It used to open with the three capture
+  sources, the model attributes, bounded reads and retention, so the first thing a reader met was
+  the design rather than a working trail. It now follows the shape `DotNetBoost.Settings`,
+  `.Media` and `.MultiLingual` use — quick start, using it in your own code, using your existing
+  database, what else it can do, the demo, packages — and each piece of reasoning it used to carry
+  is a row in its guide table pointing at the page that already held it in full: `scope.md`,
+  `stores.md`, `limitations.md`, `rest-api.md`. "What it is, and what it is not" stays, trimmed to
+  the table and one paragraph, because it is what stops someone adopting this for request logging.
+  - The quick start is an application that was built and run, not a sketch: every C# block in the
+    file compiles against `src/`, and the trail in its last step is that run's own response, with
+    the fields it trims named under the block. Because nothing is on NuGet yet it adds project
+    references and says what those three lines become once the packages are published, rather than
+    printing a `dotnet add package` that cannot work today.
+  - Two of its snippets were wrong and are corrected. Reads and prunes were still shown on
+    `reader.` and `pruner.`, which the merge into `IAuditManager` removed, and
+    `UpdatedAsync(changes, ct)` does not compile at all — the second positional parameter is
+    `metadata` — so every explicit call now passes `ct: ct`.
+
 ### Notes
 - The library depends on no other DotNetBoost package and names none of them. Composition with
   Settings, Media and MultiLingual is application code, worked out in `dotnetboost-sample`.
