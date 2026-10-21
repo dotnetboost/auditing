@@ -28,7 +28,9 @@ reads the declared entities and refuses a configuration with no store.
 | `.DisableRecording()` | Core | The kill switch. Reads still work; every record call returns `null` |
 | `.UseActorAccessor<TAccessor>()` | Core | Replace how the actor is read. Registered **scoped** — an accessor worth having reads something per request |
 | `.UseEntityKeyAccessor<TAccessor>()` | Core | Replace how entity keys are read. Both EF Core providers register one that reads the model instead |
+| `.UseObserver<TObserver>()` | Core | Be told what the engine decides **not** to record. Registered **singleton**; the default does nothing |
 | `.UseHttpContextActor()` | API | The actor from the request's `NameIdentifier` claim; `null` outside a request or unauthenticated |
+| `.UseLoggingObserver()` | API | Logs what was not recorded — warnings for the two suppressions that are usually a misconfiguration, Debug for the rest |
 | `.Build()` | Core | Validate, declare, return `IServiceCollection` |
 
 **One store per application.** A second `Use…` store call throws and names the first: entries

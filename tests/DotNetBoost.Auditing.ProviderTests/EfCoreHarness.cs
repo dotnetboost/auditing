@@ -3,6 +3,7 @@ using DotNetBoost.Auditing.Core.Attributes;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Models;
 using DotNetBoost.Auditing.EntityFrameworkCore;
+using DotNetBoost.Auditing.TestSupport;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -97,6 +98,10 @@ internal sealed class EfCoreHarness : IDisposable
 
         services.Replace(ServiceDescriptor.Scoped<IAuditActorAccessor>(_ => Actors));
 
+        // The only way a suppression is visible from outside: the interceptor records changes
+        // nobody asked it about, so there is no return value for it to hand a test.
+        services.Replace(ServiceDescriptor.Singleton<IAuditObserver>(Observer));
+
         _provider = services.BuildServiceProvider();
 
         using var scope = _provider.CreateScope();
@@ -104,6 +109,9 @@ internal sealed class EfCoreHarness : IDisposable
     }
 
     public MutableActorAccessor Actors { get; } = new();
+
+    /// <summary>What the engine and the interceptor decided not to record.</summary>
+    public RecordingAuditObserver Observer { get; } = new();
 
     /// <summary>How many saves EF has performed through this harness.</summary>
     public SaveCounter Saves { get; } = new();

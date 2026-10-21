@@ -1,6 +1,6 @@
 # Scope — DotNetBoost.Auditing
 
-> **Status:** all five packages are built and tested against this document — 397 unit tests on
+> **Status:** all five packages are built and tested against this document — 423 unit tests on
 > net8.0 and net10.0, plus 178 integration tests against PostgreSQL, SQL Server and MongoDB in
 > containers. Every store is proven against its real engine; [testing.md](testing.md) says what
 > each suite covers and what is still not covered. Written 2026-10-16 before any code existed, so the boundaries were chosen

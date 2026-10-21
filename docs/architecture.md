@@ -40,6 +40,16 @@ sibling library. A new capture source therefore cannot forget them, and a caller
 them by addressing a write itself. For an auditing library that is the whole game: it is the
 likeliest place in an application for a secret to be written down in plain text and kept for years.
 
+**What the engine declines to do is reported, not just returned.** A suppressed write returns
+`null`, which the EF Core interceptor has no caller to hand back — so `AuditRecorder` also tells
+`IAuditObserver`, with one of five reasons. The interceptor reports the skips it decides for itself
+before the engine is reached, taking the reason from `AuditRecorder.SuppressionFor` so the rule
+still lives in one place; the `IsAudited` the discovery endpoint calls stays silent, because
+reporting from there would describe an HTTP read as a suppressed write. The default observer does
+nothing and the `ILogger` one lives in the API package, which is how Core keeps its single NuGet
+dependency while still having something to say
+([limitations.md](limitations.md#nothing-tells-you-what-was-not-recorded-unless-you-ask)).
+
 `AuditPlan` works out once per type which properties are recorded and under which rule, cached per
 type and read through `AuditSchema.Describe`. `AuditEntityNames` and `EntityKey` resolve the
 `(EntityName, EntityId)` pair that every entry is filed against — Entity Addressing v1, the same

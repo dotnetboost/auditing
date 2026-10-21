@@ -23,7 +23,8 @@ internal sealed class AuditRecorder(
     IEntityKeyAccessor keys,
     AuditModelRegistry registry,
     AuditingOptions options,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IAuditObserver observer)
 {
     private readonly IAuditStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IAuditActorAccessor _actors = actors ?? throw new ArgumentNullException(nameof(actors));
@@ -31,6 +32,7 @@ internal sealed class AuditRecorder(
     private readonly AuditModelRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
     private readonly AuditingOptions _options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly TimeProvider _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    private readonly IAuditObserver _observer = observer ?? throw new ArgumentNullException(nameof(observer));
 
     /// <summary>
     /// <paramref name="entity"/>'s stored name and key. The manager turns this into an
@@ -43,24 +45,62 @@ internal sealed class AuditRecorder(
     /// Whether <paramref name="entityType"/> is audited at all, by its attributes and the current
     /// options.
     /// </summary>
-    internal bool IsAudited(Type entityType)
+    /// <remarks>
+    /// A pure question, and deliberately silent: the discovery endpoint asks it of every declared
+    /// entity on every request, so reporting from here would describe an HTTP read as a suppressed
+    /// write. A capture source that is about to skip an entity wants
+    /// <see cref="SuppressionFor(Type)"/> instead, which gives the reason to report.
+    /// </remarks>
+    internal bool IsAudited(Type entityType) => SuppressionFor(entityType) is null;
+
+    /// <summary>
+    /// Why <paramref name="entityType"/> is not audited, or <c>null</c> when it is.
+    /// </summary>
+    /// <remarks>
+    /// The same three rules <see cref="RecordAsync"/> applies, in one place so a capture source
+    /// that skips an entity early and the engine that would have skipped it late cannot disagree
+    /// about why. Reporting is the caller's, because only the caller knows whether it is about to
+    /// skip the entity or merely asking about it.
+    /// </remarks>
+    internal AuditSuppression? SuppressionFor(Type entityType)
     {
         ArgumentNullException.ThrowIfNull(entityType);
 
         if (!_options.Enabled)
-            return false;
+            return AuditSuppression.RecordingDisabled;
 
         var plan = AuditPlan.For(entityType);
-        return !plan.Ignored && (!_options.RequireOptIn || plan.OptedIn);
+
+        if (plan.Ignored)
+            return AuditSuppression.EntityIgnored;
+
+        if (_options.RequireOptIn && !plan.OptedIn)
+            return AuditSuppression.NotOptedIn;
+
+        return null;
     }
+
+    /// <summary>
+    /// Reports a suppression the caller is acting on. The seam a capture source uses, so that the
+    /// observer is reached through the engine rather than resolved separately by every source.
+    /// </summary>
+    internal void ReportSuppressed(
+        AuditSuppression reason,
+        string entityName,
+        string entityId,
+        AuditAction action) =>
+        _observer.WriteSuppressed(reason, entityName, entityId, action);
 
     /// <summary>Records one change, applying the model's rules and the engine's formatting.</summary>
     internal async Task<AuditEntry?> RecordAsync(AuditWrite write, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(write);
 
+        // Reported before the addressing is validated, because the kill switch is the one
+        // suppression that does not depend on which entity this is — and an over-long name should
+        // still throw rather than be swallowed by a disabled engine.
         if (!_options.Enabled)
-            return null;
+            return Suppressed(AuditSuppression.RecordingDisabled, write.EntityName, write.EntityId, write.Action);
 
         var entityName = Require(write.EntityName, nameof(write.EntityName), AuditEntityNames.MaxLength);
         var entityId   = Require(write.EntityId, nameof(write.EntityId), EntityKey.MaxLength);
@@ -72,17 +112,25 @@ internal sealed class AuditRecorder(
         if (plan is not null)
         {
             if (plan.Ignored)
-                return null;
+                return Suppressed(AuditSuppression.EntityIgnored, entityName, entityId, write.Action);
 
             if (_options.RequireOptIn && !plan.OptedIn)
-                return null;
+                return Suppressed(AuditSuppression.NotOptedIn, entityName, entityId, write.Action);
         }
         else if (_options.RequireOptIn)
         {
             // Opt-in is an allow-list, and an entity nothing can be proven about is not on it.
             // Recording it anyway would make RequireOptIn mean "allow-list, except by the back
             // door", which is not a setting anyone would choose.
-            return null;
+            return Suppressed(AuditSuppression.EntityNotDeclared, entityName, entityId, write.Action);
+        }
+        else if (write.EntityType is null)
+        {
+            // Recorded, but with no [AuditIgnore] or [AuditRedact] to apply — so a redacted
+            // property of this entity has just been written in full. Reported rather than inferred:
+            // with nothing declared there are no attributes to read, so the engine cannot tell
+            // whether this entity has one. See IAuditObserver.RecordedWithoutModelRules.
+            _observer.RecordedWithoutModelRules(entityName, entityId, write.Action);
         }
 
         var changes = Project(write, plan);
@@ -92,7 +140,7 @@ internal sealed class AuditRecorder(
         // because an entity whose only changing property is [AuditIgnore] would otherwise produce an
         // endless trail of entries that say a change happened and never which.
         if (write.Action == AuditAction.Updated && changes.Count == 0)
-            return null;
+            return Suppressed(AuditSuppression.NothingChanged, entityName, entityId, write.Action);
 
         var entry = new AuditEntry
         {
@@ -114,6 +162,24 @@ internal sealed class AuditRecorder(
 
         await _store.AppendAsync(entry, ct).ConfigureAwait(false);
         return entry;
+    }
+
+    /// <summary>
+    /// Tells the observer, then returns the <c>null</c> that means "deliberately not recorded".
+    /// </summary>
+    /// <remarks>
+    /// One helper rather than a report beside each <c>return null</c>, so that a suppression added
+    /// later cannot return <c>null</c> without saying why — which is the failure this whole
+    /// interface exists to prevent, and it would be a quiet one.
+    /// </remarks>
+    private AuditEntry? Suppressed(
+        AuditSuppression reason,
+        string entityName,
+        string entityId,
+        AuditAction action)
+    {
+        _observer.WriteSuppressed(reason, entityName, entityId, action);
+        return null;
     }
 
     /// <summary>

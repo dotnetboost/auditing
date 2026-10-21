@@ -253,7 +253,7 @@ public class AuditDiffTests
         var model   = AuditModelRegistry.Empty;
 
         var manager = new AuditManager(
-            new AuditRecorder(store, new NullAuditActorAccessor(), keys, model, options, time),
+            new AuditRecorder(store, new NullAuditActorAccessor(), keys, model, options, time, new NullAuditObserver()),
             new AuditReader(store, keys, options),
             new AuditPruner(store, keys, model, options, time));
 

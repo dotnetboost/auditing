@@ -1,5 +1,6 @@
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
+using DotNetBoost.Auditing.Core.Models;
 using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
@@ -20,6 +21,29 @@ public sealed class NullAuditActorAccessor : IAuditActorAccessor
 {
     /// <inheritdoc/>
     public string? GetActor() => null;
+}
+
+/// <summary>
+/// The observer registered by <c>AddAuditing()</c>: it is told everything and does nothing with it.
+/// <para>
+/// A no-op rather than no observer at all, so the engine has one call site per decision instead of
+/// a null check at each — and so that turning observation on is a registration rather than a change
+/// to the recorder. <c>DotNetBoost.Auditing.API</c> has the <c>ILogger</c>-backed one.
+/// </para>
+/// </summary>
+public sealed class NullAuditObserver : IAuditObserver
+{
+    /// <inheritdoc/>
+    public void WriteSuppressed(AuditSuppression reason, string entityName, string entityId, AuditAction action)
+    {
+        // Nothing. See the type's summary.
+    }
+
+    /// <inheritdoc/>
+    public void RecordedWithoutModelRules(string entityName, string entityId, AuditAction action)
+    {
+        // Nothing. See the type's summary.
+    }
 }
 
 /// <summary>

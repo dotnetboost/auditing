@@ -2,6 +2,7 @@ using DotNetBoost.Auditing.Core;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Models;
+using DotNetBoost.Auditing.Core.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -64,6 +65,12 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
 
     private AuditingOptions? _options;
     private AuditingOptions Options => _options ??= services.GetRequiredService<AuditingOptions>();
+
+    // The engine itself, not the public interface: this capture decides to skip an entity before
+    // the engine sees it, and the reason for that decision is the engine's to give. Resolved from
+    // the same scope as IAuditManager, so it is the same instance behind it.
+    private AuditRecorder? _recorder;
+    private AuditRecorder Recorder => _recorder ??= services.GetRequiredService<AuditRecorder>();
 
     /// <inheritdoc/>
     public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
@@ -276,15 +283,40 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
             if (!EntityDiff.IsAddressable(entry))
                 continue;
 
-            if (!Audit.IsAudited(entry.Metadata.ClrType))
+            // Reported here rather than left to the engine, because this capture skips the entity
+            // before the engine ever sees it — that is the point of asking, since the alternative
+            // is diffing an entity whose changes will be thrown away. Without this, every
+            // suppression in an EF Core application would be invisible: the interceptor writes
+            // entries for changes nobody asked it about, so there is no return value for it to
+            // hand back. The reason comes from the engine so that the rule stays in one place.
+            if (Recorder.SuppressionFor(entry.Metadata.ClrType) is { } suppression)
+            {
+                Recorder.ReportSuppressed(
+                    suppression,
+                    AuditEntityNames.For(entry.Metadata.ClrType),
+                    // Empty when the key arrives with the INSERT: this entity was skipped before it
+                    // was ever addressed, and inventing a placeholder would read as a real key.
+                    TrackedKeys.TryGetKey(entry) ?? string.Empty,
+                    action);
+
                 continue;
+            }
 
             var changes = EntityDiff.Build(entry, action, Options.RecordUpdatesWithoutBeforeImage);
 
-            // Nothing moved. Left to the engine this would return null anyway; caught here it also
-            // saves deferring an entry that will turn out to be empty.
+            // Nothing moved. Left to the engine this would return null anyway, and with the same
+            // report — but caught here it also saves deferring an entry that will turn out to be
+            // empty, so the report is made here too rather than lost to the shortcut.
             if (action == AuditAction.Updated && changes.Count == 0)
+            {
+                Recorder.ReportSuppressed(
+                    AuditSuppression.NothingChanged,
+                    AuditEntityNames.For(entry.Metadata.ClrType),
+                    TrackedKeys.TryGetKey(entry) ?? string.Empty,
+                    action);
+
                 continue;
+            }
 
             var write = new AuditWrite
             {

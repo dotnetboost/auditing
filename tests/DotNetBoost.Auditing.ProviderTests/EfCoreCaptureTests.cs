@@ -116,6 +116,13 @@ public class EfCoreCaptureTests
 
         // For an application that would rather have no entry than a valueless one.
         Assert.DoesNotContain(await harness.EntriesAsync(), e => e.Action == AuditAction.Updated);
+
+        // And it says so. This is the one suppression the interceptor decides after diffing rather
+        // than before — the diff came back empty because there was no before-image to use — so it
+        // is the interceptor's own report rather than the engine's.
+        var report = Assert.Single(harness.Observer.Suppressed, s => s.Action == AuditAction.Updated);
+        Assert.Equal(AuditSuppression.NothingChanged, report.Reason);
+        Assert.Equal("Product", report.EntityName);
     }
 
     [Fact]
@@ -408,6 +415,113 @@ public class EfCoreCaptureTests
 
         Assert.Empty(await harness.EntriesAsync());
         await harness.InScopeAsync(async (db, _) => Assert.Single(await db.Products.ToListAsync()));
+    }
+
+    // ── what the interceptor decided NOT to record ─────────────────────────
+    //
+    // The capture skips an entity before the engine sees it — that is what IsAudited is for, since
+    // the alternative is diffing an entity whose changes get thrown away. So the interceptor has to
+    // report its own skips, and these are the tests that it does: an EF Core application has no
+    // return value anywhere to check, so without the report a trail that stopped covering a table
+    // would look exactly like a table nobody changed.
+
+    [Fact]
+    public async Task An_ignored_entity_is_skipped_and_says_why()
+    {
+        using var harness = new EfCoreHarness();
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.Heartbeats.Add(new Heartbeat { At = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Empty(await harness.EntriesAsync());
+
+        var report = Assert.Single(harness.Observer.Suppressed);
+        Assert.Equal(AuditSuppression.EntityIgnored, report.Reason);
+        Assert.Equal("Heartbeat", report.EntityName);
+        Assert.Equal(AuditAction.Created, report.Action);
+    }
+
+    [Fact]
+    public async Task Opt_in_mode_says_why_an_unmarked_entity_recorded_nothing()
+    {
+        using var harness = new EfCoreHarness(o => o.RequireOptIn = true);
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.Products.Add(new Product { Name = "Widget", Price = 1m });
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Empty(await harness.EntriesAsync());
+
+        // This is the report an operator needs: the entity looks audited in the source and the
+        // table is empty, and nothing else in the application says why.
+        Assert.Equal(AuditSuppression.NotOptedIn, Assert.Single(harness.Observer.Suppressed).Reason);
+    }
+
+    [Fact]
+    public async Task The_kill_switch_says_why_a_save_recorded_nothing()
+    {
+        using var harness = new EfCoreHarness(o => o.Enabled = false);
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.Products.Add(new Product { Name = "Widget", Price = 1m });
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Empty(await harness.EntriesAsync());
+        Assert.Equal(AuditSuppression.RecordingDisabled, Assert.Single(harness.Observer.Suppressed).Reason);
+    }
+
+    [Fact]
+    public async Task A_save_that_moved_only_an_ignored_property_says_why()
+    {
+        using var harness = new EfCoreHarness();
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.Products.Add(new Product { Name = "Widget", Price = 1m });
+            await db.SaveChangesAsync();
+        });
+
+        harness.Observer.Suppressed.Clear();
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            var product = await db.Products.SingleAsync();
+            product.LastViewedAt = DateTime.UtcNow;   // [AuditIgnore]
+            await db.SaveChangesAsync();
+        });
+
+        // One Created from the first save and nothing from the second.
+        Assert.Single(await harness.EntriesAsync());
+
+        var report = Assert.Single(harness.Observer.Suppressed);
+        Assert.Equal(AuditSuppression.NothingChanged, report.Reason);
+        Assert.Equal("1", report.EntityId);
+    }
+
+    [Fact]
+    public async Task An_ordinary_capture_reports_nothing()
+    {
+        using var harness = new EfCoreHarness();
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.Products.Add(new Product { Name = "Widget", Price = 1m });
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Single(await harness.EntriesAsync());
+        Assert.Empty(harness.Observer.Suppressed);
+
+        // And never the missing-rules warning: the interceptor always has the entity, so the model
+        // rules always apply. That warning belongs to the explicit path alone.
+        Assert.Empty(harness.Observer.WithoutModelRules);
     }
 
     [Fact]

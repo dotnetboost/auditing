@@ -3,6 +3,7 @@ using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Models;
 using DotNetBoost.Auditing.Core.Services;
+using DotNetBoost.Auditing.TestSupport;
 using System.Diagnostics;
 
 namespace DotNetBoost.Auditing.UnitTests;
@@ -18,20 +19,34 @@ public class AuditRecorderTests
         string? actor = null,
         AuditModelRegistry? registry = null)
     {
+        var (manager, store, _) = Observed(configure, actor, registry);
+        return (manager, store);
+    }
+
+    /// <summary>
+    /// As <see cref="Build"/>, and with the observer's notebook — for the tests that assert on what
+    /// was <i>not</i> recorded, which is the only way that is visible from outside.
+    /// </summary>
+    private static (IAuditManager Recorder, RecordingAuditStore Store, RecordingAuditObserver Observer) Observed(
+        Action<AuditingOptions>? configure = null,
+        string? actor = null,
+        AuditModelRegistry? registry = null)
+    {
         var options = new AuditingOptions();
         configure?.Invoke(options);
 
-        var store = new RecordingAuditStore();
-        var keys  = new ConventionEntityKeyAccessor();
-        var time  = new FixedTimeProvider(Now);
-        var model = registry ?? AuditModelRegistry.Empty;
+        var store    = new RecordingAuditStore();
+        var keys     = new ConventionEntityKeyAccessor();
+        var time     = new FixedTimeProvider(Now);
+        var model    = registry ?? AuditModelRegistry.Empty;
+        var observer = new RecordingAuditObserver();
 
         var manager = new AuditManager(
-            new AuditRecorder(store, new FixedActorAccessor(actor), keys, model, options, time),
+            new AuditRecorder(store, new FixedActorAccessor(actor), keys, model, options, time, observer),
             new AuditReader(store, keys, options),
             new AuditPruner(store, keys, model, options, time));
 
-        return (manager, store);
+        return (manager, store, observer);
     }
 
     [Fact]
@@ -403,6 +418,176 @@ public class AuditRecorderTests
         Assert.True(change.IsTruncated);
         Assert.Equal(16, change.NewValue!.Length);
         Assert.Equal("short", change.OldValue);
+    }
+
+    // ── what the engine decided NOT to record ──────────────────────────────
+    //
+    // A null return says "deliberately not recorded" to a caller who checks it, and the EF Core
+    // interceptor has no caller to tell. The observer is the only way a suppression is visible from
+    // outside the recorder, so each reason gets a test: a suppression that stopped reporting would
+    // otherwise be a silent regression, which is the exact failure the interface was added for.
+
+    [Fact]
+    public async Task The_kill_switch_reports_why_nothing_was_recorded()
+    {
+        var (recorder, _, observer) = Observed(o => o.Enabled = false);
+
+        Assert.Null(await recorder.For(new Product { Id = 7 }).UpdatedAsync(
+        [
+            new AuditChange(nameof(Product.Price), 1m, 2m)
+        ]));
+
+        var report = Assert.Single(observer.Suppressed);
+        Assert.Equal(AuditSuppression.RecordingDisabled, report.Reason);
+        Assert.Equal("Product", report.EntityName);
+        Assert.Equal("7", report.EntityId);
+        Assert.Equal(AuditAction.Updated, report.Action);
+    }
+
+    [Fact]
+    public async Task An_ignored_entity_reports_that_it_was_ignored()
+    {
+        var (recorder, _, observer) = Observed();
+
+        Assert.Null(await recorder.For(new Heartbeat { Id = 1 }).UpdatedAsync(
+        [
+            new AuditChange(nameof(Heartbeat.Id), 1, 1)
+        ]));
+
+        Assert.Equal(AuditSuppression.EntityIgnored, Assert.Single(observer.Suppressed).Reason);
+    }
+
+    [Fact]
+    public async Task Opt_in_reports_an_entity_that_is_not_marked()
+    {
+        var (recorder, _, observer) = Observed(o => o.RequireOptIn = true);
+
+        Assert.Null(await recorder.For(new Product { Id = 1 }).UpdatedAsync(
+        [
+            new AuditChange(nameof(Product.Price), 1m, 2m)
+        ]));
+
+        Assert.Equal(AuditSuppression.NotOptedIn, Assert.Single(observer.Suppressed).Reason);
+
+        // And the entity that IS marked is recorded, reporting nothing.
+        Assert.NotNull(await recorder.For(new Invoice { Id = 1 }).UpdatedAsync(
+        [
+            new AuditChange(nameof(Invoice.Total), 1m, 2m)
+        ]));
+
+        Assert.Single(observer.Suppressed);
+    }
+
+    [Fact]
+    public async Task Opt_in_distinguishes_an_undeclared_entity_from_an_unmarked_one()
+    {
+        var (recorder, _, observer) = Observed(o => o.RequireOptIn = true);
+
+        Assert.Null(await recorder.For("Unknown", "1").UpdatedAsync(
+        [
+            new AuditChange("Anything", 1, 2)
+        ]));
+
+        // Its own reason, not NotOptedIn: nothing is declared under that name, so this is a missing
+        // DeclareEntitiesFrom rather than a decision — which is why the logging observer warns on
+        // this one and not on the other.
+        Assert.Equal(AuditSuppression.EntityNotDeclared, Assert.Single(observer.Suppressed).Reason);
+    }
+
+    [Fact]
+    public async Task An_update_with_nothing_left_to_say_reports_that_too()
+    {
+        var registry = new AuditModelRegistry(new Dictionary<string, Type>(StringComparer.Ordinal)
+        {
+            ["Person"] = typeof(PersonEntity)
+        });
+
+        var (recorder, store, observer) = Observed(registry: registry);
+
+        // The only property that moved is [AuditIgnore], so there is nothing recordable left.
+        Assert.Null(await recorder.For("Person", "42").UpdatedAsync(
+        [
+            new AuditChange(nameof(PersonEntity.LastSeenAt), DateTime.UnixEpoch, DateTime.UnixEpoch.AddDays(1))
+        ]));
+
+        Assert.Empty(store.Entries);
+        Assert.Equal(AuditSuppression.NothingChanged, Assert.Single(observer.Suppressed).Reason);
+    }
+
+    [Fact]
+    public async Task A_recorded_change_reports_nothing()
+    {
+        var (recorder, _, observer) = Observed();
+
+        Assert.NotNull(await recorder.For(new Product { Id = 1 }).UpdatedAsync(
+        [
+            new AuditChange(nameof(Product.Price), 1m, 2m)
+        ]));
+
+        Assert.Empty(observer.Suppressed);
+    }
+
+    [Fact]
+    public async Task A_write_with_no_declared_entity_reports_that_its_rules_were_not_applied()
+    {
+        var (recorder, store, observer) = Observed();
+
+        // A Dapper application that never called DeclareEntitiesFrom: addressed by name, no type,
+        // nothing in the registry. The entry IS written — and had this entity a [AuditRedact]
+        // property, its value would have gone in with it.
+        Assert.NotNull(await recorder.For("Person", "42").UpdatedAsync(
+        [
+            new AuditChange(nameof(PersonEntity.PasswordHash), "old", "new")
+        ]));
+
+        var report = Assert.Single(observer.WithoutModelRules);
+        Assert.Equal("Person", report.EntityName);
+        Assert.Equal("42", report.EntityId);
+
+        // The proof that the warning is not hypothetical: the redacted value is in the table.
+        var change = Assert.Single(Assert.Single(store.Entries).Changes);
+        Assert.False(change.IsRedacted);
+        Assert.Equal("new", change.NewValue);
+
+        Assert.Empty(observer.Suppressed);
+    }
+
+    [Fact]
+    public async Task A_declared_entity_applies_its_rules_and_reports_nothing()
+    {
+        var registry = new AuditModelRegistry(new Dictionary<string, Type>(StringComparer.Ordinal)
+        {
+            ["Person"] = typeof(PersonEntity)
+        });
+
+        var (recorder, store, observer) = Observed(registry: registry);
+
+        Assert.NotNull(await recorder.For("Person", "42").UpdatedAsync(
+        [
+            new AuditChange(nameof(PersonEntity.PasswordHash), "old", "new")
+        ]));
+
+        // Declared, so the rules were applied — and there is nothing to report.
+        Assert.True(Assert.Single(Assert.Single(store.Entries).Changes).IsRedacted);
+        Assert.Empty(observer.WithoutModelRules);
+        Assert.Empty(observer.Suppressed);
+    }
+
+    [Fact]
+    public async Task Addressing_a_write_with_the_entity_itself_needs_no_declaration()
+    {
+        var (recorder, store, observer) = Observed();
+
+        // The type travels with the subject, so the rules come from the attributes directly and
+        // there is nothing missing to report. This is why an EF Core application never sees the
+        // warning: it always has the entity.
+        Assert.NotNull(await recorder.For(new PersonEntity { Id = Guid.NewGuid() }).UpdatedAsync(
+        [
+            new AuditChange(nameof(PersonEntity.PasswordHash), "old", "new")
+        ]));
+
+        Assert.True(Assert.Single(Assert.Single(store.Entries).Changes).IsRedacted);
+        Assert.Empty(observer.WithoutModelRules);
     }
 
     [Fact]

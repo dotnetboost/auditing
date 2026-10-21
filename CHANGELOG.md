@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 397 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 423 tests on net8.0 and
 net10.0 needing nothing installed, plus 178 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -36,6 +36,32 @@ MongoDB in containers.
 - **Redaction applied in the engine**, not in each capture source, so no later source can forget
   it. `[AuditRedact]` records that a property changed with both values withheld, and a caller
   cannot opt out.
+- **`IAuditObserver` — what the engine decided *not* to record.** Recording returns `null` to say
+  "deliberately not recorded", which a caller on the explicit path may check and the EF Core
+  interceptor cannot: it records changes nobody asked it about, so there was no return value
+  anywhere for it to hand back, and it threw the `null` away. An application that stopped being
+  audited — opt-in turned on, `[AuditIgnore]` reaching a base class, `DeclareEntitiesFrom`
+  forgotten — therefore carried on looking healthy while the trail quietly stopped covering a
+  table, which is unrecoverable by the time anyone goes looking.
+  - Five reasons, each reported with the entity and the action: `RecordingDisabled`,
+    `EntityIgnored`, `NotOptedIn`, `EntityNotDeclared` and `NothingChanged`. `EntityNotDeclared` is
+    deliberately its own reason rather than part of `NotOptedIn` — it means a missing declaration
+    rather than a decision, and they warrant different levels.
+  - A sixth report for the write that *is* recorded but without the model's rules, because nothing
+    is declared under its name. That is the one failure here that cannot be undone: a `[AuditRedact]`
+    property has just gone into the table in full, and the engine cannot infer that it has one, so
+    it says what it does know rather than guessing.
+  - The interceptor reports its own skips, since it decides them before the engine is reached — the
+    reason comes from `AuditRecorder.SuppressionFor` so the rule still lives in one place. The
+    `IsAudited` the discovery endpoint calls stays silent, because reporting from there would
+    describe an HTTP read as a suppressed write.
+  - `.UseObserver<T>()` registers one; the default does nothing, so this costs an application that
+    does not want it a virtual call per suppressed write. `DotNetBoost.Auditing.API` ships the
+    `ILogger`-backed `.UseLoggingObserver()`, which keeps Core's single NuGet dependency intact —
+    warnings for the two suppressions that are usually a misconfiguration, Debug for the three that
+    are configured intent, because a high-churn ignored entity reports one on every save and at any
+    higher level it would be the first thing an operator filtered out.
+
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the
   exclusion, a per-entity retention would be silently the opposite of what it says.

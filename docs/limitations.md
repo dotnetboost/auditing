@@ -99,7 +99,50 @@ the scope — and the guarantee is the same as the EF Core store's.
 
 Everything there is addressed by name and key, so the engine has no type to read `[AuditRedact]` and
 `[AuditIgnore]` from. Without `DeclareEntitiesFrom(assembly)` at `Build()`, **a redacted property is
-written to the table in full** — the one failure in this library that is both silent and permanent.
+written to the table in full** — the one failure in this library that is permanent, because the
+values cannot be unwritten.
+
+It no longer has to be silent as well. The engine reports every such write to `IAuditObserver`, and
+`.UseLoggingObserver()` turns that into a warning naming the entity and the fix — so an application
+that registers one finds out on the first write rather than from the table months later. Nothing is
+reported by default: the observer registered by `AddAuditing()` does nothing, which is why the line
+is worth adding. See [the observer](#nothing-tells-you-what-was-not-recorded-unless-you-ask) below.
+
+## Nothing tells you what was not recorded, unless you ask
+
+The engine declines to record a change in five cases, all of them correct: recording is disabled,
+the entity is `[AuditIgnore]`, opt-in is on and the entity is not `[Audited]`, opt-in is on and
+nothing is declared under the entity's name, or an update whose every changed property is ignored.
+Recording returns `null` to say so.
+
+**By default that is the only signal, and on the EF Core path there is none at all.** The
+interceptor records changes nobody asked it about, so it has no return value to hand back — it
+throws the `null` away. So an application that quietly stops being audited, because opt-in was
+turned on or `[AuditIgnore]` reached a base class, carries on looking healthy: logs clean, health
+checks green, and the trail simply stops mentioning a table. That is usually discovered by someone
+looking for a change that was never recorded, and an audit trail is the one thing that cannot be
+backfilled.
+
+Registering an observer closes it:
+
+```csharp
+services.AddAuditing()
+        .UseEntityFrameworkCore<AppDbContext>()
+        .UseLoggingObserver()        // or .UseObserver<MyMetricsObserver>()
+        .Build();
+```
+
+Every suppression is then reported with its reason, by the interceptor as well as by the explicit
+path. The two that are nearly always a misconfiguration — opt-in with nothing declared, and a write
+recorded with no model rules to apply — are logged as warnings; the three that are configured intent
+are Debug, because a high-churn ignored entity reports one on every save.
+
+**It is off unless you ask**, which is the limitation rather than the feature: the default observer
+does nothing, so the line above is the difference between finding out on the first write and finding
+out from the table. Core ships no logging dependency, which is why the `ILogger` one lives in
+`DotNetBoost.Auditing.API` and anything else needs `IAuditObserver` implemented — four lines, and
+[the interface](../src/DotNetBoost.Auditing.Core/Interfaces/Interfaces.cs) says what it may not do:
+throw, or block.
 
 ## MongoDB timestamps are milliseconds
 
