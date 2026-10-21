@@ -1,6 +1,7 @@
 # DotNetBoost.Auditing documentation
 
-Start with the [README](../README.md). These pages go further.
+[The README](../README.md) has the five-minute quick start, the verbs an application calls, and the
+shortest version of what this library is and is not. These pages go further.
 
 ## Understanding it
 
@@ -24,15 +25,24 @@ Start with the [README](../README.md). These pages go further.
 | [Aspire](aspire.md) | One command for both database engines, all three sample APIs and the dashboard — and why each trail shares its application's database |
 | [Dashboard](dashboard.md) | The Nuxt client, and the four ways a trail viewer can quietly mislead |
 
+The three sample APIs document themselves as code you can `curl`:
+[`SampleApp`](../samples/SampleApp/README.md) (EF Core),
+[`SampleApp.Dapper`](../samples/SampleApp.Dapper/README.md) and
+[`SampleApp.MongoDb`](../samples/SampleApp.MongoDb/README.md) — the same routes over the same two
+entities, so the difference between them is only ever the store.
+
 ## Still to write
 
-These follow the packages they describe, so they are listed here rather than left to be discovered
-missing:
+These five follow the packages they describe, so they are listed here rather than left to be
+discovered missing. None of them is a gap in what is documented, only in where: the material exists
+today in the sections on the right, which is also where the README's guide table points.
 
-| | |
-|---|---|
-| `architecture.md` | The engine, the store contract, and where the rules are applied |
-| `recording.md` | `IAuditManager.For(…)` in full, and the three capture sources |
-| `querying.md` | The read verbs, the clamp, and the filters |
-| `retention.md` | Pruning, per-entity retention, and the erasure path |
-| `redaction.md` | `[AuditIgnore]` vs `[AuditRedact]`, and why the engine owns both |
+| Planned page | | Until then |
+|---|---|---|
+| `architecture.md` | The engine, the store contract, and where the rules are applied | [scope.md §10](scope.md#10-one-manager-and-what-it-cost), and `IAuditStore`'s own XML docs |
+| `recording.md` | `IAuditManager.For(…)` in full, and the three capture sources | [scope.md §7](scope.md#7-how-changes-are-captured), [stores.md](stores.md) |
+| `querying.md` | The read verbs, the clamp, and the filters | [scope.md §8](scope.md#8-reading), [rest-api.md](rest-api.md#reading-a-page) |
+| `retention.md` | Pruning, per-entity retention, and the erasure path | [scope.md §9](scope.md#9-retention) |
+| `redaction.md` | `[AuditIgnore]` vs `[AuditRedact]`, and why the engine owns both | [scope.md §6](scope.md#6-redaction-and-sensitive-data) |
+
+Released changes are in [CHANGELOG.md](../CHANGELOG.md).
