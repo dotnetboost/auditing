@@ -326,6 +326,7 @@ services.AddAuditing(o =>
 | Give an admin a web UI | [Dashboard](docs/dashboard.md) |
 | Run the whole stack with one command | [.NET Aspire](docs/aspire.md) |
 | See every builder method and option | [Configuration reference](docs/configuration-reference.md) |
+| Understand how it works inside | [Architecture](docs/architecture.md) |
 | See how it is tested, and what is not covered | [Testing](docs/testing.md) |
 
 Everything is indexed in [docs/](docs/README.md), and released changes in
