@@ -6,9 +6,10 @@ same attributes, same routes, same request and response bodies — the DTOs and 
 three APIs without a change.
 
 The recording is the same explicit recording as `samples/SampleApp.Dapper`'s, line for line in
-places. That is the honest summary of the explicit path: it costs the same whatever the engine, and
-its two halves are a read for the before-image and a call per change. What is specific to *this*
-store is the shape of an entry, and where the atomicity goes.
+places — including `AuditDiff.Between(before, after)` for the comparison, which reads the entity's
+properties and so knows nothing about either store. That is the honest summary of the explicit path:
+it costs the same whatever the engine, and its two halves are a read for the before-image and a call
+per change. What is specific to *this* store is the shape of an entry, and where the atomicity goes.
 
 ## One collection, changes embedded
 
@@ -159,7 +160,7 @@ Identical to the EF Core sample's, and each one records what the interceptor wou
 | | |
 |---|---|
 | `POST /api/products` | Key from the counter, one insert for the document and one for the entry |
-| `PUT /api/products/{id}` | A read for the before-image, a replace, then `UpdatedAsync` with only what moved |
+| `PUT /api/products/{id}` | A read for the before-image, a replace, then `UpdatedAsync` with what `AuditDiff.Between` found |
 | `GET /api/products/{id}` | Bumps the `[AuditIgnore]` view count **and reports it** — the engine returns `null` |
 | `DELETE /api/products/{id}` | `findOneAndDelete`, so the final values come back in the same round trip |
 | `GET /api/products/{id}/history` | One entity's trail — and it still answers for a deleted product |

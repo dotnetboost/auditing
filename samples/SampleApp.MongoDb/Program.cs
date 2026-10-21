@@ -1,6 +1,7 @@
 using DotNetBoost.Auditing.API;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Models;
+using DotNetBoost.Auditing.Core.Services;
 using MongoDB.Driver;
 using SampleApp;
 using SampleApp.Dtos;
@@ -218,20 +219,15 @@ products.MapPost("/", async (
 
     await collection.InsertOneAsync(product, options: null, ct);
 
-    // The initial values, as NewValue. For(product) carries the type, so SupplierCost is recorded
-    // as changed with its values withheld.
+    // The initial values, as NewValue — read off the entity rather than listed, so a new property is
+    // in the trail the day it is added to Product. For(product) carries the type, so SupplierCost is
+    // recorded as changed with its values withheld.
     //
     // One insert writes the whole entry, changes and all: the property changes are embedded in the
     // entry document rather than kept in a second collection. So there is no window in which the
     // trail holds an entry whose property rows have not arrived — which is a guarantee the
     // relational stores need a transaction for.
-    await audit.For(product).CreatedAsync(
-    [
-        new AuditChange(nameof(Product.Name), null, product.Name),
-        new AuditChange(nameof(Product.Price), null, product.Price),
-        new AuditChange(nameof(Product.Category), null, product.Category),
-        new AuditChange(nameof(Product.SupplierCost), null, product.SupplierCost)
-    ], ct: ct);
+    await audit.For(product).CreatedAsync(AuditDiff.InitialValues(product), ct: ct);
 
     return Results.Created($"/api/products/{product.Id}", ToResponse(product));
 })
@@ -264,22 +260,18 @@ products.MapPut("/{id:int}", async (
     };
 
     // Only the properties that actually moved, which the change tracker works out for the EF Core
-    // sample. The engine would record nothing for an Updated write whose list came out empty, but
-    // the comparison itself belongs where the two values are.
-    var changes = new List<AuditChange>(capacity: 4);
+    // sample and AuditDiff works out from the type here. The same call as the Dapper sample's, on
+    // documents rather than rows: it reads the entity's properties, so it knows nothing about either
+    // store — adding a property to Product adds it to the trail in both.
+    //
+    // It compares the properties the engine reasons about: not Id, which is already the entry's
+    // address, and not the [AuditIgnore] view count, so a request that moved nothing else comes back
+    // empty rather than as an entry that says a change happened and never which. SupplierCost IS
+    // compared — [AuditRedact] withholds the values from the collection, not from the comparison.
+    var changes = AuditDiff.Between(before, after);
 
-    if (after.Name != before.Name)
-        changes.Add(new AuditChange(nameof(Product.Name), before.Name, after.Name));
-
-    if (after.Price != before.Price)
-        changes.Add(new AuditChange(nameof(Product.Price), before.Price, after.Price));
-
-    if (after.Category != before.Category)
-        changes.Add(new AuditChange(nameof(Product.Category), before.Category, after.Category));
-
-    if (after.SupplierCost != before.SupplierCost)
-        changes.Add(new AuditChange(nameof(Product.SupplierCost), before.SupplierCost, after.SupplierCost));
-
+    // The engine would refuse an Updated write of nothing anyway; returning here also saves the
+    // replace and the round trip.
     if (changes.Count == 0)
         return Results.Ok(ToResponse(before));
 
@@ -308,16 +300,11 @@ products.MapDelete("/{id:int}", async (
         return Results.NotFound();
 
     // The final values, as OldValue — and worth the trouble, because after the delete this entry is
-    // the only copy of what the document said. Nothing cascades to the trail: the entries are their
-    // own collection with no reference to this one, so the history survives the document by design
-    // rather than by luck.
-    await audit.For(product).DeletedAsync(
-    [
-        new AuditChange(nameof(Product.Name), product.Name, null),
-        new AuditChange(nameof(Product.Price), product.Price, null),
-        new AuditChange(nameof(Product.Category), product.Category, null),
-        new AuditChange(nameof(Product.SupplierCost), product.SupplierCost, null)
-    ], ct: ct);
+    // the only copy of what the document said, which is the one entry where listing the properties
+    // by hand and forgetting one cannot be repaired afterwards. Nothing cascades to the trail: the
+    // entries are their own collection with no reference to this one, so the history survives the
+    // document by design rather than by luck.
+    await audit.For(product).DeletedAsync(AuditDiff.FinalValues(product), ct: ct);
 
     return Results.NoContent();
 })
@@ -484,11 +471,10 @@ app.MapPost("/api/stock-checks", async (
 
     await collection.InsertOneAsync(check, options: null, ct);
 
-    await audit.For(check).CreatedAsync(
-    [
-        new AuditChange(nameof(StockCheck.ProductId), null, check.ProductId),
-        new AuditChange(nameof(StockCheck.OnHand), null, check.OnHand)
-    ], ct: ct);
+    // CheckedAt is in here too, which the hand-written list it replaced left out — the EF Core
+    // sample's interceptor has always recorded it, so the three samples now say the same thing about
+    // the same entity.
+    await audit.For(check).CreatedAsync(AuditDiff.InitialValues(check), ct: ct);
 
     return Results.NoContent();
 })

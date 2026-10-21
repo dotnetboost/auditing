@@ -2,6 +2,7 @@ using Dapper;
 using DotNetBoost.Auditing.API;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Models;
+using DotNetBoost.Auditing.Core.Services;
 using Npgsql;
 using SampleApp;
 using SampleApp.Dapper.Data;
@@ -239,15 +240,10 @@ products.MapPost("/", async (
     product.Id = await connection.ExecuteScalarAsync<int>(
         new CommandDefinition(sql, product, unitOfWork.Current, cancellationToken: ct));
 
-    // The initial values, as NewValue. For(product) carries the type, so SupplierCost is recorded
-    // as changed with its values withheld.
-    await audit.For(product).CreatedAsync(
-    [
-        new AuditChange(nameof(Product.Name), null, product.Name),
-        new AuditChange(nameof(Product.Price), null, product.Price),
-        new AuditChange(nameof(Product.Category), null, product.Category),
-        new AuditChange(nameof(Product.SupplierCost), null, product.SupplierCost)
-    ], ct: ct);
+    // The initial values, as NewValue — read off the entity rather than listed, so a new property
+    // is in the trail the day it is added to Product. For(product) carries the type, so SupplierCost
+    // is recorded as changed with its values withheld.
+    await audit.For(product).CreatedAsync(AuditDiff.InitialValues(product), ct: ct);
 
     return Results.Created($"/api/products/{product.Id}", ToResponse(product));
 })
@@ -283,22 +279,18 @@ products.MapPut("/{id:int}", async (
     };
 
     // Only the properties that actually moved, which the change tracker works out for the EF Core
-    // sample. The engine would record nothing for an Updated write whose list came out empty, but
-    // the comparison itself belongs where the two values are.
-    var changes = new List<AuditChange>(capacity: 4);
+    // sample and AuditDiff works out from the type here. Written out as four `if`s it worked just as
+    // well until someone added a fifth property to Product and the trail quietly stopped mentioning
+    // it — which is the failure this call is here to remove.
+    //
+    // It compares the properties the engine reasons about: not Id, which is already the entry's
+    // address, and not the [AuditIgnore] view count, so a request that moved nothing else comes back
+    // empty rather than as an entry that says a change happened and never which. SupplierCost IS
+    // compared — [AuditRedact] withholds the values from the table, not from the comparison.
+    var changes = AuditDiff.Between(before, after);
 
-    if (after.Name != before.Name)
-        changes.Add(new AuditChange(nameof(Product.Name), before.Name, after.Name));
-
-    if (after.Price != before.Price)
-        changes.Add(new AuditChange(nameof(Product.Price), before.Price, after.Price));
-
-    if (after.Category != before.Category)
-        changes.Add(new AuditChange(nameof(Product.Category), before.Category, after.Category));
-
-    if (after.SupplierCost != before.SupplierCost)
-        changes.Add(new AuditChange(nameof(Product.SupplierCost), before.SupplierCost, after.SupplierCost));
-
+    // The engine would refuse an Updated write of nothing anyway; returning here also saves the
+    // UPDATE and the round trip.
     if (changes.Count == 0)
         return Results.Ok(ToResponse(before));
 
@@ -336,15 +328,11 @@ products.MapDelete("/{id:int}", async (
         new CommandDefinition(sql, new { Id = id }, unitOfWork.Current, cancellationToken: ct));
 
     // The final values, as OldValue — and worth the trouble, because after the DELETE this entry is
-    // the only copy of what the row said. Nothing cascades to the trail: the audit tables carry no
-    // foreign key to Products, so the history survives the row by design rather than by luck.
-    await audit.For(product).DeletedAsync(
-    [
-        new AuditChange(nameof(Product.Name), product.Name, null),
-        new AuditChange(nameof(Product.Price), product.Price, null),
-        new AuditChange(nameof(Product.Category), product.Category, null),
-        new AuditChange(nameof(Product.SupplierCost), product.SupplierCost, null)
-    ], ct: ct);
+    // the only copy of what the row said, which is the one entry where listing the properties by
+    // hand and forgetting one cannot be repaired afterwards. Nothing cascades to the trail: the
+    // audit tables carry no foreign key to Products, so the history survives the row by design
+    // rather than by luck.
+    await audit.For(product).DeletedAsync(AuditDiff.FinalValues(product), ct: ct);
 
     return Results.NoContent();
 })
@@ -517,11 +505,10 @@ app.MapPost("/api/stock-checks", async (
     check.Id = await connection.ExecuteScalarAsync<int>(
         new CommandDefinition(sql, check, unitOfWork.Current, cancellationToken: ct));
 
-    await audit.For(check).CreatedAsync(
-    [
-        new AuditChange(nameof(StockCheck.ProductId), null, check.ProductId),
-        new AuditChange(nameof(StockCheck.OnHand), null, check.OnHand)
-    ], ct: ct);
+    // CheckedAt is in here too, which the hand-written list it replaced left out — the EF Core
+    // sample's interceptor has always recorded it, so the three samples now say the same thing about
+    // the same entity.
+    await audit.For(check).CreatedAsync(AuditDiff.InitialValues(check), ct: ct);
 
     return Results.NoContent();
 })

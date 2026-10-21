@@ -33,7 +33,7 @@ Works with **.NET 8 and .NET 10**. `DotNetBoost.Auditing.Core` has **one** NuGet
 `Microsoft.Extensions.DependencyInjection.Abstractions` — and no dependency on any other
 DotNetBoost package.
 
-> **Status:** in development. All five packages are built and tested — **367 tests** needing nothing
+> **Status:** in development. All five packages are built and tested — **388 tests** needing nothing
 > installed, on both target frameworks, plus **168 integration tests** against **PostgreSQL 16, SQL
 > Server 2022 and MongoDB 7** in containers, including the atomicity guarantee below. One contract
 > suite is run against every store, the in-memory double included; see
@@ -88,6 +88,23 @@ a change tracker cannot see: a raw `ExecuteUpdate`, a stored procedure, a domain
 await audit.For(product).CreatedAsync([new AuditChange(nameof(Product.Name), null, "Widget")], ct);
 await audit.For("Product", "42").DeletedAsync(ct: ct);   // no instance needed
 ```
+
+The change list does not have to be written out. `AuditDiff` is the stand-in for a change tracker:
+it reports what moved between two instances of an entity, so the property list comes off the type
+rather than out of an `if` chain that stops mentioning the property somebody adds next year.
+
+```csharp
+var changes = AuditDiff.Between(before, after);          // only what moved, or empty
+await audit.For(after).UpdatedAsync(changes, ct);
+
+await audit.For(product).CreatedAsync(AuditDiff.InitialValues(product), ct: ct);
+await audit.For(product).DeletedAsync(AuditDiff.FinalValues(product), ct: ct);
+```
+
+It leaves out the key (already the entry's address) and `[AuditIgnore]` properties, compares
+`[AuditRedact]` ones and lets the engine withhold their values, and skips anything that is not a
+simple value — a navigation property, a collection, a nested object — which is the one thing to know
+before using it: those are skipped silently and still need reporting by hand.
 
 The Dapper and MongoDB stores write when they are called rather than joining a unit of work, so
 **atomicity is yours to arrange**: hand the first your transaction, or the second a session, and the

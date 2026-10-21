@@ -389,6 +389,20 @@ Repository: `~/dev/dotnetboost-auditing`, `github.com/dotnetboost/auditing`.
   `Microsoft.Extensions.DependencyInjection.Abstractions`: options are validated at `Build()`
   instead of through a hosted service, and the engine has nothing to say at runtime that is not
   either a thrown exception or a recorded entry.
+- **`AuditDiff`, and it was the samples that argued for it.** §7b said the explicit path reports its
+  own change list, which is true and is not the same thing as writing one out. Both non-EF samples
+  grew the identical four-property `if` chain, in two files, and a chain like that is correct the day
+  it is written and silently incomplete the day a property is added to the entity: nothing fails, the
+  trail simply stops mentioning that property. `AuditDiff.Between` / `InitialValues` / `FinalValues`
+  take the property list off the type instead. It is a convenience over the model rather than a
+  second set of rules — it skips the key (already the address), skips `[AuditIgnore]` so that an
+  update of only ignored properties comes back empty, compares `[AuditRedact]` and leaves the
+  withholding to the engine, and skips anything that is not a simple value. That last one is the
+  honest cost: a navigation property, a collection or a nested object is skipped **silently**,
+  because comparing them by reference would report a change on every write, so an entity whose
+  interesting state lives in a nested object still reports it by hand. Key discovery moved into one
+  internal place both this and `ConventionEntityKeyAccessor` read — the diff has to leave out exactly
+  the property the addressing uses, and two copies of that rule would eventually be two rules.
 - **Truncate the correlation id, refuse the actor.** Both are bounded columns, and the two deserve
   opposite answers. An over-long actor is a misconfigured accessor and half an identity is a
   different identity, so it throws. A correlation id is a diagnostic aid, and failing a business

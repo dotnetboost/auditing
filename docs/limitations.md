@@ -44,6 +44,21 @@ saved this way still produces an entry, because from outside the two are the sam
 Set `RecordUpdatesWithoutBeforeImage = false` to skip these instead — and prefer loading the entity
 before changing it, which brings the before-image back.
 
+## `AuditDiff` compares simple values only
+
+The explicit path's stand-in for a change tracker reflects over the entity's properties, and it
+compares the ones that hold a value type, a string or a `byte[]`. A navigation property, a
+collection or a nested object is **skipped silently**: comparing those by reference would report a
+change on every write, and a trail column is not a place to put an object graph.
+
+So an entity whose interesting state lives in a nested object gets no entry for a change to it from
+`AuditDiff` alone. The list it returns is a plain `List<AuditChange>` for exactly this reason — add
+the change yourself and record it with the rest. It also leaves out the key, which is already the
+entry's address, and `[AuditIgnore]` properties, which the engine would drop anyway.
+
+Nothing about this applies to the EF Core capture: it reads the model, which knows what a navigation
+is.
+
 ## Owned types are not recorded
 
 An owned entity shares its owner's key, so it has no address of its own: its entries would be filed

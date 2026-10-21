@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 367 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 388 tests on net8.0 and
 net10.0 needing nothing installed, plus 168 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -21,6 +21,14 @@ MongoDB in containers.
   - `AuditSchema.Describe(type)` — the properties of an audited entity and their rules, read from
     `AuditPlan` and cached per type. The rule for *which* properties count lives there too, so a
     description and the recorder cannot drift apart.
+  - `AuditDiff.Between(before, after)` + `InitialValues` / `FinalValues` — the explicit path's
+    stand-in for a change tracker, so a Dapper or MongoDB application reports what moved without a
+    hand-written `if` per property. It leaves out the key (already the entry's address) and
+    `[AuditIgnore]` properties, compares `[AuditRedact]` ones and leaves the withholding to the
+    engine, and skips anything that is not a simple value — a navigation property, a collection, a
+    nested object — which is documented rather than hidden, because that part is silent. Key
+    discovery now lives in one place that both this and `ConventionEntityKeyAccessor` read, so the
+    diff and the addressing cannot disagree about which property is the key.
   - **DotNetBoost Entity Addressing v1**, implemented independently and asserted by the test
     suite. `EntityKey.AddressingVersion` is published for a consumer to compare with
     `DotNetBoost.Media`'s and `DotNetBoost.MultiLingual`'s.

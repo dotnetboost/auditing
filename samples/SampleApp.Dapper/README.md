@@ -15,6 +15,13 @@ that an interceptor has something to diff, but because there is no other way to 
 were. A blind `UPDATE` is one round trip cheaper and records nothing worth reading: a trail that
 cannot say what a price changed *from* is most of the value gone.
 
+**The comparison is `AuditDiff.Between(before, after)`**, not a property-by-property `if` chain. The
+chain this replaced was correct, and it would have stayed correct only until somebody added a
+property to `Product`: nothing fails when a diff written by hand misses one, the trail just stops
+mentioning it. `AuditDiff` reads the type instead, skips the key and the `[AuditIgnore]` view count,
+and still leaves `[AuditRedact]` to the engine — `AuditDiff.InitialValues` / `FinalValues` do the
+same for the creation and the deletion. See [docs/stores.md](../../docs/stores.md).
+
 **Atomicity is arranged, not inherited.** `AppendAsync` issues its `INSERT`s when it is called, so
 without a transaction each entry commits by itself. `Data/UnitOfWork.cs` puts an `IDbTransaction` in
 the request scope and `UseDapper(...)` resolves one when it builds its store, so a row's `UPDATE`
@@ -104,8 +111,8 @@ curl -s -X PUT localhost:5281/api/products/1 \
 curl -s localhost:5281/api/products/1/history
 ```
 
-One `Updated` entry with one property change, `24.99 → 19.99`. Nothing else is in it, because the
-`PUT` compared the before-image and sent only what moved.
+One `Updated` entry with one property change, `24.99 → 19.99`. Nothing else is in it, because
+`AuditDiff.Between` compared the before-image with the after-image and sent only what moved.
 
 Now the one that matters:
 
@@ -141,10 +148,10 @@ Identical to the EF Core sample's, and each one records what the interceptor wou
 
 | | |
 |---|---|
-| `POST /api/products` | `INSERT … RETURNING "Id"`, then `CreatedAsync` with the initial values |
-| `PUT /api/products/{id}` | `SELECT` for the before-image, `UPDATE`, then `UpdatedAsync` with only what moved |
+| `POST /api/products` | `INSERT … RETURNING "Id"`, then `CreatedAsync` with `AuditDiff.InitialValues` |
+| `PUT /api/products/{id}` | `SELECT` for the before-image, `UPDATE`, then `UpdatedAsync` with what `AuditDiff.Between` found |
 | `GET /api/products/{id}` | Bumps the `[AuditIgnore]` view count **and reports it** — the engine returns `null` |
-| `DELETE /api/products/{id}` | `DELETE`, then `DeletedAsync` with the final values. Nothing cascades to the trail |
+| `DELETE /api/products/{id}` | `DELETE`, then `DeletedAsync` with `AuditDiff.FinalValues`. Nothing cascades to the trail |
 | `GET /api/products/{id}/history` | One entity's trail — and it still answers for a deleted product |
 | `POST /api/products/discount` | One set-based `UPDATE`, one entry per product. Not a special case here |
 | `POST /api/products/{id}/fail` | Writes both, then throws: **neither** is committed |

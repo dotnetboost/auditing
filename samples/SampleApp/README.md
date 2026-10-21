@@ -68,8 +68,10 @@ two stores — the DTOs and `SystemActorAccessor.cs` are *this project's files*,
 — so the dashboard can be pointed at any of the three without a change.
 
 What differs there is that **every entry is written by hand**, because neither store has a change
-tracker to read. The three `POST /api/products/{id}/fail` endpoints are the shortest way to see what
-that costs and what it does not: here the change and its entry are already committed; in the Dapper
+tracker to read — `AuditDiff.Between(before, after)` does the comparison for them, but the read that
+gets the before-image and the call that records the entry are lines in their endpoints. The three
+`POST /api/products/{id}/fail` endpoints are the shortest way to see what that costs and what it does
+not: here the change and its entry are already committed; in the Dapper
 sample a transaction takes both back; in the MongoDB sample the price moves and the trail stays
 silent. [docs/stores.md](../../docs/stores.md) is the page on it.
 
