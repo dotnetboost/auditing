@@ -2,13 +2,13 @@
 
 The EF Core sample (`samples/SampleApp`) over the Dapper store. Same `Product` and `StockCheck`,
 same attributes, same routes, same request and response bodies — the DTOs and the actor accessor are
-*the same files*, compiled into both projects — so `clients/dashboard` can be pointed at either API
-without a change.
+*the same files*, compiled into all three sample projects — so `clients/dashboard` can be pointed at
+any of the three APIs without a change.
 
 What differs is **who notices a change**. There is no change tracker, so nothing notices: every
 entry in this sample is written by a line in `Program.cs`.
 
-## The two things that change, and where to look
+## What differs, and where to look
 
 **The before-image comes from a `SELECT`.** `PUT /api/products/{id}` loads the row first — not so
 that an interceptor has something to diff, but because there is no other way to know what the values
@@ -20,7 +20,7 @@ chain this replaced was correct, and it would have stayed correct only until som
 property to `Product`: nothing fails when a diff written by hand misses one, the trail just stops
 mentioning it. `AuditDiff` reads the type instead, skips the key and the `[AuditIgnore]` view count,
 and still leaves `[AuditRedact]` to the engine — `AuditDiff.InitialValues` / `FinalValues` do the
-same for the creation and the deletion. See [docs/stores.md](../../docs/stores.md).
+same for the creation and the deletion.
 
 **Atomicity is arranged, not inherited.** `AppendAsync` issues its `INSERT`s when it is called, so
 without a transaction each entry commits by itself. `Data/UnitOfWork.cs` puts an `IDbTransaction` in
@@ -34,25 +34,17 @@ purpose: it has to cover the library's own `MapAuditEndpoints()` too, or a `POST
 would delete entries inside a transaction nobody commits, report how many it deleted, and leave them
 all in place.
 
-[docs/stores.md](../../docs/stores.md) is the one page on this.
+**`DeclareEntitiesFrom` is not optional here.** The EF Core sample needs that line for one endpoint;
+a Dapper application needs it the way this one does. A write addressed **by name** has no type for
+the engine to read `[AuditRedact]` from, and undeclared, a redacted property is written to the table
+in full — the one failure in this library that is both silent and permanent. It is also how a prune
+finds `StockCheck`'s own 30-day retention, and what `GET /api/audit/entities` answers with, so
+`curl localhost:5281/api/audit/entities` shows the line working in one command. Every write in this
+sample happens to go through `audit.For(entity)`, which carries the type, so the redaction here
+survives the line being commented out — which is exactly why it is worth understanding before a
+refactor addresses one write by name.
 
-## What `DeclareEntitiesFrom` is doing here
-
-The EF Core sample needs that line for one endpoint. This sample needs it the way every Dapper
-application does:
-
-- A write addressed **by name** — `audit.For("Product", "42")`, which is what a composite key or a
-  row nothing loaded forces — has no type for the engine to read `[AuditRedact]` from. Undeclared,
-  a redacted property is written to the table in full. That is the one failure in this library that
-  is both silent and permanent.
-- A **prune** finds `StockCheck`'s own 30-day retention through the declared types. Undeclared, the
-  global sweep would take its entries with everything else's.
-- `GET /api/audit/entities` answers with them, so the dashboard's model page is empty without it.
-
-Every write in this sample goes through `audit.For(entity)`, which carries the type, so the
-redaction here survives the line being commented out — the second and third bullets do not, and
-`curl localhost:5281/api/audit/entities` shows it in one command. The first bullet is the one to
-take seriously anyway: it is one refactor away, and it cannot be noticed afterwards.
+[docs/stores.md](../../docs/stores.md) is the one page on all of this.
 
 ## Run it
 
