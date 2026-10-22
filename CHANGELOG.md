@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 423 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 433 tests on net8.0 and
 net10.0 needing nothing installed, plus 178 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -61,6 +61,34 @@ MongoDB in containers.
     warnings for the two suppressions that are usually a misconfiguration, Debug for the three that
     are configured intent, because a high-churn ignored entity reports one on every save and at any
     higher level it would be the first thing an operator filtered out.
+
+- **Three counters, on the meter `DotNetBoost.Auditing`.** `entries.recorded` tagged by entity and
+  action, `writes.suppressed` tagged by entity, reason and action, and `entries.deleted` tagged
+  `prune` or `erase`. The first is the one to alert on, and it is the absence that matters: "this
+  entity recorded nothing for an hour" is the shape of every way a trail stops covering a table, and
+  it is the question a suppression report cannot answer — a report is about the writes that *were*
+  declined and says nothing about the ones that should have arrived and did not. The counters are
+  also the only form in which the Debug-level suppressions are visible in production.
+  - **Not an `IAuditObserver` implementation**, deliberately: the observer is registered with
+    `Replace`, so metrics behind it would be switched off by an application that registered an
+    observer of its own, and telemetry should not be something you can turn off by accident. The
+    observer is for what an application must react to; a counter is for what it watches.
+  - Core keeps its single NuGet dependency. `Meter` and `IMeterFactory` are in the shared framework
+    on both target frameworks — which is also why `Activity.Current` was already usable for
+    correlation ids. The engine takes the host's `IMeterFactory` when there is one and owns a meter
+    when there is not, so a console application that only called `AddAuditing()` still starts.
+  - Nothing is emitted until something subscribes, and each instrument is asked whether it is
+    enabled before a tag is built, so an unsubscribed counter is a field read and a branch.
+  - **The entity key and the actor are not tags anywhere.** Both are unbounded — one of those turns
+    a counter into a time series per row or per person — and the actor is personal data the rest of
+    the library is careful with. Both sit on every write, so a test asserts no measurement carries
+    either rather than leaving it to the documentation.
+  - The Aspire defaults subscribe, so the dashboard shows all three for every sample API with no
+    wiring in the samples: creating a product moves `recorded`, and `GET /api/products/{id}` bumps
+    an `[AuditIgnore]` view count so reading one moves `suppressed` instead.
+  - [observability.md](docs/observability.md) is the new page for both halves — the observer and the
+    counters, what each answers, and why the two misconfigurations are warnings rather than
+    instruments of their own.
 
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the

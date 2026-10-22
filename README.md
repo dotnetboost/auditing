@@ -40,7 +40,7 @@ Works with **.NET 8 and .NET 10**, on **SQL Server, PostgreSQL, SQLite or MongoD
 DotNetBoost package.
 
 > **Status:** in development, and **nothing is on NuGet yet** — the quick start below references the
-> projects in `src/`. All five packages are built and tested: **423 tests** needing nothing
+> projects in `src/`. All five packages are built and tested: **433 tests** needing nothing
 > installed, on both target frameworks, plus **178 integration tests** against **PostgreSQL 16, SQL
 > Server 2022 and MongoDB 7** in containers. See [testing.md](docs/testing.md), which also lists
 > what is not covered yet.
@@ -322,7 +322,7 @@ services.AddAuditing(o =>
 | Prune on a schedule, or erase one person's trail on request | [Retention](docs/scope.md#9-retention) |
 | Capture changes a sibling library made (`DotNetBoost.Settings`) | [How changes are captured](docs/scope.md#7-how-changes-are-captured) |
 | Join an audit entry to a media row or a translation row | [It stands alone](#it-stands-alone) |
-| Find out when a change was *not* recorded, and why | [Limitations](docs/limitations.md#nothing-tells-you-what-was-not-recorded-unless-you-ask) |
+| Find out when a change was *not* recorded, and why | [Observability](docs/observability.md) |
 | Know what this cannot do, and what to use instead | [Limitations](docs/limitations.md), [Scope](docs/scope.md) |
 | Give an admin a web UI | [Dashboard](docs/dashboard.md) |
 | Run the whole stack with one command | [.NET Aspire](docs/aspire.md) |

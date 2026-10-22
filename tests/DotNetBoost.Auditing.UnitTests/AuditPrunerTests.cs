@@ -2,6 +2,7 @@ using DotNetBoost.Auditing.Core;
 using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Models;
 using DotNetBoost.Auditing.Core.Services;
+using DotNetBoost.Auditing.TestSupport;
 using System.Globalization;
 
 namespace DotNetBoost.Auditing.UnitTests;
@@ -12,7 +13,8 @@ public class AuditPrunerTests
 
     private static (AuditPruner Pruner, RecordingAuditStore Store) Build(
         Action<AuditingOptions>? configure = null,
-        AuditModelRegistry? registry = null)
+        AuditModelRegistry? registry = null,
+        MetricsProbe? probe = null)
     {
         var options = new AuditingOptions();
         configure?.Invoke(options);
@@ -24,7 +26,9 @@ public class AuditPrunerTests
             new ConventionEntityKeyAccessor(),
             registry ?? AuditModelRegistry.Empty,
             options,
-            new FixedTimeProvider(Now));
+            new FixedTimeProvider(Now),
+            // With no probe the counters go to a meter nothing listens to.
+            new AuditMetrics(probe));
 
         return (pruner, store);
     }

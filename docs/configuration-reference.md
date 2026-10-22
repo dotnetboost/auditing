@@ -31,6 +31,7 @@ reads the declared entities and refuses a configuration with no store.
 | `.UseObserver<TObserver>()` | Core | Be told what the engine decides **not** to record. Registered **singleton**; the default does nothing |
 | `.UseHttpContextActor()` | API | The actor from the request's `NameIdentifier` claim; `null` outside a request or unauthenticated |
 | `.UseLoggingObserver()` | API | Logs what was not recorded — warnings for the two suppressions that are usually a misconfiguration, Debug for the rest |
+| `AuditingTelemetry.MeterName` | Core | Not a builder method: the meter to pass to `AddMeter(…)` for the three counters. See [Observability](observability.md) |
 | `.Build()` | Core | Validate, declare, return `IServiceCollection` |
 
 **One store per application.** A second `Use…` store call throws and names the first: entries

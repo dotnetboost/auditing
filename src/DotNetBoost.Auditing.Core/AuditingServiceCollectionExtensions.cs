@@ -3,6 +3,7 @@ using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.Diagnostics.Metrics;
 using System.Reflection;
 
 namespace Microsoft.Extensions.DependencyInjection
@@ -51,6 +52,12 @@ namespace Microsoft.Extensions.DependencyInjection
             // one that does ask gets the only signal there is that a trail has stopped covering
             // something. DotNetBoost.Auditing.API has the ILogger-backed one.
             services.TryAddSingleton<IAuditObserver, NullAuditObserver>();
+
+            // Three counters, on the meter named by AuditingTelemetry.MeterName. GetService rather
+            // than GetRequiredService: an ASP.NET Core host has an IMeterFactory registered and a
+            // console application that only called AddAuditing() does not, and a library that
+            // refused to start over telemetry nobody subscribed to would deserve the bug report.
+            services.TryAddSingleton(sp => new AuditMetrics(sp.GetService<IMeterFactory>()));
 
             // An empty registry until Build() replaces it, so an engine built without declarations
             // applies no model rules by name rather than failing to resolve.

@@ -24,7 +24,8 @@ internal sealed class AuditRecorder(
     AuditModelRegistry registry,
     AuditingOptions options,
     TimeProvider timeProvider,
-    IAuditObserver observer)
+    IAuditObserver observer,
+    AuditMetrics metrics)
 {
     private readonly IAuditStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IAuditActorAccessor _actors = actors ?? throw new ArgumentNullException(nameof(actors));
@@ -33,6 +34,7 @@ internal sealed class AuditRecorder(
     private readonly AuditingOptions _options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly TimeProvider _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     private readonly IAuditObserver _observer = observer ?? throw new ArgumentNullException(nameof(observer));
+    private readonly AuditMetrics _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
 
     /// <summary>
     /// <paramref name="entity"/>'s stored name and key. The manager turns this into an
@@ -81,15 +83,19 @@ internal sealed class AuditRecorder(
     }
 
     /// <summary>
-    /// Reports a suppression the caller is acting on. The seam a capture source uses, so that the
-    /// observer is reached through the engine rather than resolved separately by every source.
+    /// Reports a suppression the caller is acting on — to the observer and to the counter. The seam
+    /// a capture source uses, so that neither is reached separately by every source and a new source
+    /// cannot report one of the two and forget the other.
     /// </summary>
     internal void ReportSuppressed(
         AuditSuppression reason,
         string entityName,
         string entityId,
-        AuditAction action) =>
+        AuditAction action)
+    {
         _observer.WriteSuppressed(reason, entityName, entityId, action);
+        _metrics.Suppressed(reason, entityName, action);
+    }
 
     /// <summary>Records one change, applying the model's rules and the engine's formatting.</summary>
     internal async Task<AuditEntry?> RecordAsync(AuditWrite write, CancellationToken ct = default)
@@ -161,6 +167,12 @@ internal sealed class AuditRecorder(
         }
 
         await _store.AppendAsync(entry, ct).ConfigureAwait(false);
+
+        // Counted here, which is "handed to the store" and not "committed" — the EF Core store only
+        // tracks an entry, and the caller's SaveChanges is what makes it durable. See
+        // AuditingTelemetry.EntriesRecorded.
+        _metrics.Recorded(entityName, write.Action);
+
         return entry;
     }
 
@@ -178,7 +190,7 @@ internal sealed class AuditRecorder(
         string entityId,
         AuditAction action)
     {
-        _observer.WriteSuppressed(reason, entityName, entityId, action);
+        ReportSuppressed(reason, entityName, entityId, action);
         return null;
     }
 

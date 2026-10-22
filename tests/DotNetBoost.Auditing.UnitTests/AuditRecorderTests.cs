@@ -41,10 +41,14 @@ public class AuditRecorderTests
         var model    = registry ?? AuditModelRegistry.Empty;
         var observer = new RecordingAuditObserver();
 
+        // No meter factory, so the counters are on a meter of their own that nothing listens to —
+        // which is also the shape a console application gets. AuditMetricsTests has the probe.
+        var metrics = new AuditMetrics(factory: null);
+
         var manager = new AuditManager(
-            new AuditRecorder(store, new FixedActorAccessor(actor), keys, model, options, time, observer),
+            new AuditRecorder(store, new FixedActorAccessor(actor), keys, model, options, time, observer, metrics),
             new AuditReader(store, keys, options),
-            new AuditPruner(store, keys, model, options, time));
+            new AuditPruner(store, keys, model, options, time, metrics));
 
         return (manager, store, observer);
     }

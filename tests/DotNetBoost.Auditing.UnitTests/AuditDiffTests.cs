@@ -252,10 +252,12 @@ public class AuditDiffTests
         var time    = TimeProvider.System;
         var model   = AuditModelRegistry.Empty;
 
+        var metrics = new AuditMetrics(factory: null);
+
         var manager = new AuditManager(
-            new AuditRecorder(store, new NullAuditActorAccessor(), keys, model, options, time, new NullAuditObserver()),
+            new AuditRecorder(store, new NullAuditActorAccessor(), keys, model, options, time, new NullAuditObserver(), metrics),
             new AuditReader(store, keys, options),
-            new AuditPruner(store, keys, model, options, time));
+            new AuditPruner(store, keys, model, options, time, metrics));
 
         return (manager, store);
     }

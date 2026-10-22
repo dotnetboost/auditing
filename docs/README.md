@@ -19,6 +19,7 @@ shortest version of what this library is and is not. These pages go further.
 | [Stores](stores.md) | EF Core, Dapper and MongoDB — the same two tables for the first two, and the very different moment each becomes durable. One sample per store |
 | [REST API](rest-api.md) | Every endpoint, the two security defaults that differ from the sibling packages, and every status code |
 | [Configuration reference](configuration-reference.md) | Every builder method, every option on `AuditingOptions`, the attributes, and each store's own settings |
+| [Observability](observability.md) | How to find out the trail stopped being written — the five suppressions, the two log levels, and the three counters |
 
 ## Running it
 

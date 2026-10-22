@@ -58,6 +58,12 @@ builder.Services.AddAuditing(options =>
     // addressed by hand has no type for the engine to read [AuditRedact] from unless the assembly
     // is declared. In an application that only ever uses the interceptor it is optional.
     .DeclareEntitiesFrom(typeof(Product).Assembly)
+    // Logs what the engine decided NOT to record, which is otherwise invisible: a null return is
+    // the only signal, and the interceptor has no caller to hand it to. Warnings for the two cases
+    // that are usually a misconfiguration, Debug for the rest. The three counters need no line
+    // here — they are on the meter named by AuditingTelemetry.MeterName, which the Aspire defaults
+    // subscribe to, so they appear in the dashboard while this app runs.
+    .UseLoggingObserver()
     .Build();
 
 builder.Services.AddProblemDetails();

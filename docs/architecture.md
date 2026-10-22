@@ -47,8 +47,14 @@ before the engine is reached, taking the reason from `AuditRecorder.SuppressionF
 still lives in one place; the `IsAudited` the discovery endpoint calls stays silent, because
 reporting from there would describe an HTTP read as a suppressed write. The default observer does
 nothing and the `ILogger` one lives in the API package, which is how Core keeps its single NuGet
-dependency while still having something to say
-([limitations.md](limitations.md#nothing-tells-you-what-was-not-recorded-unless-you-ask)).
+dependency while still having something to say.
+
+Three counters sit beside it on the meter `AuditingTelemetry.MeterName` — entries recorded, writes
+suppressed, entries deleted. They are **not** behind `IAuditObserver`, because that interface is
+registered with `Replace` and telemetry should not be switchable off by accident; the observer is
+what an application reacts to and a counter is what it watches. `AuditRecorder.ReportSuppressed` is
+the single seam that feeds both, so a capture source cannot report one and forget the other
+([observability.md](observability.md)).
 
 `AuditPlan` works out once per type which properties are recorded and under which rule, cached per
 type and read through `AuditSchema.Describe`. `AuditEntityNames` and `EntityKey` resolve the

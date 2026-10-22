@@ -106,7 +106,8 @@ It no longer has to be silent as well. The engine reports every such write to `I
 `.UseLoggingObserver()` turns that into a warning naming the entity and the fix — so an application
 that registers one finds out on the first write rather than from the table months later. Nothing is
 reported by default: the observer registered by `AddAuditing()` does nothing, which is why the line
-is worth adding. See [the observer](#nothing-tells-you-what-was-not-recorded-unless-you-ask) below.
+is worth adding. See [observability.md](observability.md), and
+[the section below](#nothing-tells-you-what-was-not-recorded-unless-you-ask).
 
 ## Nothing tells you what was not recorded, unless you ask
 
@@ -137,12 +138,14 @@ path. The two that are nearly always a misconfiguration — opt-in with nothing 
 recorded with no model rules to apply — are logged as warnings; the three that are configured intent
 are Debug, because a high-churn ignored entity reports one on every save.
 
-**It is off unless you ask**, which is the limitation rather than the feature: the default observer
-does nothing, so the line above is the difference between finding out on the first write and finding
-out from the table. Core ships no logging dependency, which is why the `ILogger` one lives in
-`DotNetBoost.Auditing.API` and anything else needs `IAuditObserver` implemented — four lines, and
-[the interface](../src/DotNetBoost.Auditing.Core/Interfaces/Interfaces.cs) says what it may not do:
-throw, or block.
+There are also three counters — entries recorded, writes suppressed, entries deleted — and the first
+is the one to alert on, because "this entity recorded nothing for an hour" is the shape of every way
+a trail stops covering a table.
+
+**But all of it is off unless you ask**, which is the limitation rather than the feature: the default
+observer does nothing and no counter is emitted until something subscribes, so those two lines are
+the difference between finding out on the first write and finding out from the table.
+[observability.md](observability.md) has both, the levels and the reasoning.
 
 ## MongoDB timestamps are milliseconds
 

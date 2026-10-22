@@ -14,13 +14,15 @@ internal sealed class AuditPruner(
     IEntityKeyAccessor keys,
     AuditModelRegistry registry,
     AuditingOptions options,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    AuditMetrics metrics)
 {
     private readonly IAuditStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IEntityKeyAccessor _keys = keys ?? throw new ArgumentNullException(nameof(keys));
     private readonly AuditModelRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
     private readonly AuditingOptions _options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly TimeProvider _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    private readonly AuditMetrics _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
 
     internal async Task<int> PruneAsync(int batchSize = 1000, CancellationToken ct = default)
     {
@@ -71,7 +73,7 @@ internal sealed class AuditPruner(
     internal Task<int> EraseForAsync(object entity, CancellationToken ct = default)
     {
         var (name, id) = AuditAddress.Of(entity, _keys);
-        return _store.DeleteForEntityAsync(name, id, ct);
+        return ErasedAsync(_store.DeleteForEntityAsync(name, id, ct));
     }
 
     internal Task<int> EraseForAsync(string entityName, string entityId, CancellationToken ct = default)
@@ -79,13 +81,30 @@ internal sealed class AuditPruner(
         ArgumentException.ThrowIfNullOrWhiteSpace(entityName);
         ArgumentException.ThrowIfNullOrWhiteSpace(entityId);
 
-        return _store.DeleteForEntityAsync(entityName, entityId, ct);
+        return ErasedAsync(_store.DeleteForEntityAsync(entityName, entityId, ct));
     }
 
     internal Task<int> EraseForActorAsync(string actor, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
-        return _store.DeleteForActorAsync(actor, ct);
+        return ErasedAsync(_store.DeleteForActorAsync(actor, ct));
+    }
+
+    /// <summary>
+    /// Counts what an erasure deleted, once the store says how much that was.
+    /// </summary>
+    /// <remarks>
+    /// Not tagged by entity, unlike the other two counters: of the three erasure verbs only one
+    /// knows a single entity name, and an instrument whose tags depend on which overload was called
+    /// is harder to read than one without them. What the number is for is "how much history went",
+    /// which the operation alone answers.
+    /// </remarks>
+    private async Task<int> ErasedAsync(Task<int> erasure)
+    {
+        var deleted = await erasure.ConfigureAwait(false);
+        _metrics.Deleted(deleted, AuditingTelemetry.OperationErase);
+
+        return deleted;
     }
 
     /// <summary>
@@ -105,6 +124,11 @@ internal sealed class AuditPruner(
         {
             var deleted = await _store.DeleteOlderThanAsync(cutoff, scope, batchSize, ct).ConfigureAwait(false);
             total += deleted;
+
+            // Per batch rather than per sweep, so a long first prune shows progress instead of
+            // arriving as one number at the end — and so a cancelled sweep still counted what it
+            // actually deleted.
+            _metrics.Deleted(deleted, AuditingTelemetry.OperationPrune);
 
             if (deleted < batchSize)
                 break;
