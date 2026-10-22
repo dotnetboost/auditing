@@ -215,13 +215,16 @@ its caller, including an HTTP request, for the whole sweep. There is deliberatel
 the live-writer case: the first attempt at one was a lock-contention storm that said more about
 SQLite's single writer than about this loop, and a flaky test here would be worse than the note.
 
-## Not tested under concurrency or at scale
+## Not tested at scale
 
-Several connections writing at once is now covered for the one case that was a defect — see above —
-but not generally: nothing yet has several scopes recording, pruning and reading at the same time
-against a real engine. Nor has anything put a million entries in a table: the prune is batched and
-the indexes are chosen for the reads the library issues, but that choice is reasoning, not
-measurement.
+Concurrency is now covered against PostgreSQL — eight writers on their own connections, eight
+scopes saving through the interceptor at once, a prune running while recording continues, and a
+cursor walk with entries arriving between every page. See [testing.md](testing.md).
+
+What is still reasoning rather than measurement is **scale**: nothing has put a million entries in
+a table. The prune is batched and the indexes are chosen for the reads the library issues, but no
+one has timed either. That belongs in a benchmark run before a release rather than in a suite that
+runs on every push, and it has not been written.
 
 ## MySQL and MariaDB are not supported
 

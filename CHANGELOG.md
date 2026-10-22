@@ -6,7 +6,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 The first work on the library. All five packages are built and tested: 480 tests on net8.0 and
-net10.0 needing nothing installed, plus 198 integration tests against PostgreSQL, SQL Server and
+net10.0 needing nothing installed, plus 202 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
 ### Added
@@ -175,6 +175,22 @@ MongoDB in containers.
   configuration when registering — rather than promising a runtime switch the engine does not have.
   It was the last place in the library where the docs described behaviour the code does not have.
 
+- **Concurrency is tested, against PostgreSQL.** Four tests for what happens when several things
+  use a trail at once: eight writers on their own connections, eight scopes saving through the EF
+  Core interceptor at the same time — every one down the deferred path, which is the most intricate
+  code in the library and had never been run concurrently — a prune sweeping while recording
+  continues, and a cursor walk with an entry arriving between every page. Nothing asserts a
+  duration; every assertion is a count, a set or an absence, so a slow container cannot fail them.
+  - PostgreSQL rather than SQLite, because SQLite's shared cache admits one writer and two
+    connections contending there say more about SQLite than about this library.
+  - The prune test is the evidence for the batching: a sweep and eight writers overlap, nothing
+    deadlocks, every old entry goes and every new one stays. The cutoff being fixed when the sweep
+    starts is what makes the second half true by construction.
+  - The paging test doubles as evidence for the cursor. Replacing `After` with `Skip` in it turns
+    250 milliseconds into more than ten minutes: each arrival pushes a row back into the part not
+    yet walked, so the walk never reaches an empty page. Offset paging under concurrent writes is
+    usually described as showing a row twice — it can also simply never finish.
+
 - **Fixed: two audited writes on one connection could corrupt each other.** The Dapper store
   borrows the scope's `IDbConnection` — which the application can inject too — with "open it if it
   is closed, close it if I opened it". That is a check-then-act on shared state: two concurrent
@@ -329,7 +345,7 @@ MongoDB in containers.
   which is also one parameter rather than one per id and so has no 2100-parameter ceiling.
 
 ### Added — testing
-- **`DotNetBoost.Auditing.IntegrationTests`** — 198 tests against **PostgreSQL 16, SQL Server 2022
+- **`DotNetBoost.Auditing.IntegrationTests`** — 202 tests against **PostgreSQL 16, SQL Server 2022
   and MongoDB 7 (as a replica set)** in Testcontainers.
   - A **conformance suite**: one set of contract tests inherited once per store and engine, so all
     five combinations are shown answering the same questions the same way. The one place the stores

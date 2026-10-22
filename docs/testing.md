@@ -12,13 +12,35 @@ The layout is the one `DotNetBoost.Settings`, `.Media` and `.MultiLingual` use �
 | `ProviderTests` | 233 | net8.0, net10.0 | Nothing. Every store, over SQLite |
 | `ApiTests` | 59 | net8.0, net10.0 | Nothing. A real ASP.NET Core host |
 | `SurfaceTests` | 7 | net8.0, net10.0 | Nothing. The public surface of all five packages, against a committed baseline |
-| `IntegrationTests` | 198 | net10.0 | **Docker.** PostgreSQL 16, SQL Server 2022, MongoDB 7 (replica set) |
+| `IntegrationTests` | 202 | net10.0 | **Docker.** PostgreSQL 16, SQL Server 2022, MongoDB 7 (replica set) |
 
 ```bash
 dotnet test                                                   # everything — 556 tests
 dotnet test tests/DotNetBoost.Auditing.IntegrationTests       # containers only
 dotnet test --filter "FullyQualifiedName!~SqlServer"          # skip the slow fixture
 ```
+
+## Concurrency is tested against PostgreSQL, not SQLite
+
+Four tests in `IntegrationTests` cover what happens when several things use a trail at once: eight
+writers on their own connections, eight scopes saving through the EF Core interceptor
+simultaneously — every one down the deferred path, which is the most intricate code in the library
+and was previously never run concurrently — a prune sweeping while recording continues, and a cursor
+walk with an entry arriving between every page.
+
+**PostgreSQL deliberately.** SQLite's shared cache admits one writer, so two connections contending
+there teach you about SQLite's locking and nothing about this library: an early attempt at one of
+these tests on SQLite was a lock-contention storm that ran for ten minutes and proved nothing.
+
+**No assertion is a duration.** Every one is an invariant — a count, a set, an absence — because a
+test that fails when a container is slow gets deleted, and then there is neither a test nor the
+confidence. Each worker does a fixed amount of work and stops, so there are no timers and no
+cancellation to get wrong.
+
+One of them doubles as evidence for a design decision: replacing the cursor with `Skip` in the
+paging test turns 250 milliseconds into more than ten minutes, because every arrival pushes a row
+back into the part not yet walked and the walk never reaches an empty page. Offset paging under
+concurrent writes is usually described as showing a row twice; it can also simply not finish.
 
 ## The public surface is a committed file
 
