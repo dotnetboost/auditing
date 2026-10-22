@@ -258,6 +258,17 @@ public sealed class MongoAuditStore(
         if (query.To is { } to)
             filter &= builder.Lt(d => d.OccurredAt, Utc(to));
 
+        if (query.After is { } cursor)
+        {
+            // Everything strictly after the cursor in the sort this store issues: newest first, so
+            // "after" is older, and at the same instant a smaller id.
+            var at = Utc(cursor.OccurredAt);
+
+            filter &= builder.Or(
+                builder.Lt(d => d.OccurredAt, at),
+                builder.And(builder.Eq(d => d.OccurredAt, at), builder.Lt(d => d.Id, cursor.Id)));
+        }
+
         return filter;
     }
 

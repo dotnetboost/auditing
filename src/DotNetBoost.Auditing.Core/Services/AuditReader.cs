@@ -19,10 +19,28 @@ internal sealed class AuditReader(
     internal Task<AuditEntry?> GetAsync(Guid id, CancellationToken ct = default) =>
         _store.GetAsync(id, ct);
 
-    internal Task<AuditPage> QueryAsync(AuditQuery query, CancellationToken ct = default)
+    internal async Task<AuditPage> QueryAsync(AuditQuery query, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return _store.QueryAsync(Clamp(query), ct);
+
+        // Two answers to "where does this page start". Refused rather than letting one win: a read
+        // that silently ignored the other would page wrongly, and page wrongly quietly.
+        if (query.After is not null && query.Skip > 0)
+        {
+            throw new ArgumentException(
+                "A query sets both Skip and After, which are two ways of saying where the page starts. " +
+                "Use After to walk a trail — it costs the same at any depth and an entry arriving " +
+                "mid-walk cannot shift a row across a boundary — or Skip to jump to a page number.",
+                nameof(query));
+        }
+
+        var page = await _store.QueryAsync(Clamp(query), ct).ConfigureAwait(false);
+
+        // Derived here rather than in each store, so what a cursor points at is defined once. A
+        // store assembling its own page leaves NextCursor null and this fills it in.
+        return page.Entries.Count == 0
+            ? page
+            : page with { NextCursor = AuditCursor.Of(page.Entries[^1]) };
     }
 
     internal Task<AuditPage> HistoryAsync(object entity, int skip = 0, int take = 0, CancellationToken ct = default)

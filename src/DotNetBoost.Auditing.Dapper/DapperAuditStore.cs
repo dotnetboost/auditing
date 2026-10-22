@@ -469,6 +469,20 @@ public sealed class DapperAuditStore(
             parameters.Add("To", AuditRows.Utc(to));
         }
 
+        if (query.After is { } cursor)
+        {
+            // Everything strictly after the cursor in the ORDER BY this store issues: newest first,
+            // so "after" is older, and at the same instant a smaller id. Spelled as OR rather than
+            // the row-value form (a, b) < (x, y), which PostgreSQL has and SQL Server does not.
+            where.Append(
+                CultureInfo.InvariantCulture,
+                $"AND ({sql.Column("OccurredAt")} < @AfterAt OR ({sql.Column("OccurredAt")} = @AfterAt " +
+                $"AND {sql.Column("Id")} < @AfterId)) ");
+
+            parameters.Add("AfterAt", AuditRows.Utc(cursor.OccurredAt));
+            parameters.Add("AfterId", cursor.Id);
+        }
+
         return (where.ToString(), parameters);
     }
 

@@ -244,6 +244,21 @@ public sealed class EfCoreAuditStore(DbContext context) : IAuditStore
         if (query.To is { } to)
             entries = entries.Where(e => e.OccurredAt < to);
 
+        if (query.After is { } cursor)
+        {
+            // Everything strictly after the cursor in this store's own ordering — newest first, so
+            // "after" is older, and at the same instant a smaller id. Locals rather than the
+            // struct's members so both arrive as parameters.
+            var at = cursor.OccurredAt;
+            var id = cursor.Id;
+
+            // CompareTo rather than an operator: Guid gained one in .NET 9 and this package also
+            // targets net8.0. Both EF 8 and EF 10 translate it, to the column comparison the
+            // ORDER BY uses — which is what makes the two agree about where a page ends.
+            entries = entries.Where(e =>
+                e.OccurredAt < at || (e.OccurredAt == at && e.Id.CompareTo(id) < 0));
+        }
+
         return entries;
     }
 }

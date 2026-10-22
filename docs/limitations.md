@@ -169,6 +169,11 @@ round-trips through the MongoDB store comes back truncated. Ordering is unaffect
 entry id is the tiebreaker in every sort — but two trails of the same events, one in MongoDB and one
 in SQL, will not compare equal to the tick.
 
+It reaches cursors too, in one narrow way: build an `AuditCursor` from an entry the engine returned
+from *recording* rather than from a read, and its timestamp has ticks the stored document does not,
+so the entry can come back on the next page. `AuditPage.NextCursor` — the cursor a read hands you,
+and the one the REST endpoints issue — is taken from what the store returned, so it matches.
+
 ## MongoDB atomicity needs a replica set
 
 Multi-document transactions are a replica-set feature, so a standalone `mongod` cannot make an entry

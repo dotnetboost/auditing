@@ -5,8 +5,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 440 tests on net8.0 and
-net10.0 needing nothing installed, plus 178 integration tests against PostgreSQL, SQL Server and
+The first work on the library. All five packages are built and tested: 470 tests on net8.0 and
+net10.0 needing nothing installed, plus 198 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
 ### Added
@@ -120,6 +120,37 @@ MongoDB in containers.
     key the INSERT gave it. Measured rather than reasoned about. The save still throws, so the trap
     is catching it and reusing that context — a later `SaveChanges` would write nothing and lose
     the row.
+
+- **Keyset paging: `AuditQuery.After` and `AuditPage.NextCursor`.** `Skip`/`Take` made the database
+  read and discard everything before the page, so page 4,000 of a trail cost 200,000 rows to serve —
+  on the one table in an application that only grows. It was also unstable: an entry arriving
+  between two requests shifted every later row by one, so a client walking a live trail saw a row
+  twice and missed another. A cursor costs the same at any depth, and an insert cannot move a row
+  across a boundary defined by the rows themselves.
+  - It works because the ordering every store already issued — `OccurredAt` descending with `Id`
+    as the tiebreaker — is a *total* order. That tiebreaker was there so two entries in the same
+    tick could not swap places between pages; this is what it buys. A timestamp-only cursor would
+    return a tied group again or skip it, which a conformance test pins by stepping through four
+    entries that share an instant, one at a time.
+  - `AuditCursor` carries `(OccurredAt, Id)` and round-trips as one base64url token — URL-safe with
+    no escaping, and readable by anyone debugging rather than pretending to be a secret. It parses
+    back to the tick, because a cursor whose instant moved would silently skip or repeat an entry.
+    Anything the library did not issue is refused rather than read as some other position.
+  - Spelled per store against each engine's own comparison, so the predicate and the `ORDER BY`
+    cannot disagree: `OR` rather than the row-value form `(a, b) < (x, y)`, which PostgreSQL has and
+    SQL Server does not; `Guid.CompareTo` in EF Core, because `Guid` only gained comparison
+    operators in .NET 9 and this package also targets net8.0. Verified against SQL Server's unusual
+    `uniqueidentifier` ordering as well as PostgreSQL's, SQLite's and MongoDB's.
+  - `NextCursor` is derived by the engine from the last entry rather than by each store, so what a
+    cursor points at is defined once. It is **not** a promise that more exist — the last full page
+    carries one and the next request comes back empty, which avoids reading a row past every page
+    to answer a question most callers never ask.
+  - `Skip` with `After` is refused rather than one silently winning: they are two answers to where
+    the page starts, and a read that ignored one would page wrongly and quietly. `Skip` stays, and
+    is still the right tool for a UI with numbered pages — the dashboard uses it for exactly that.
+  - Over HTTP: `?after=` and `nextCursor` on the page. A malformed cursor is a `400` rather than the
+    newest page, which would have left a client looping over page one for ever with nothing to
+    explain why.
 
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the
@@ -246,7 +277,7 @@ MongoDB in containers.
   which is also one parameter rather than one per id and so has no 2100-parameter ceiling.
 
 ### Added — testing
-- **`DotNetBoost.Auditing.IntegrationTests`** — 178 tests against **PostgreSQL 16, SQL Server 2022
+- **`DotNetBoost.Auditing.IntegrationTests`** — 198 tests against **PostgreSQL 16, SQL Server 2022
   and MongoDB 7 (as a replica set)** in Testcontainers.
   - A **conformance suite**: one set of contract tests inherited once per store and engine, so all
     five combinations are shown answering the same questions the same way. The one place the stores

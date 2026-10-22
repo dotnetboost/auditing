@@ -72,7 +72,17 @@ GET /api/audit?entityName=Product&entityId=42&take=50
 GET /api/audit?actor=alice@example.com&from=2026-10-01T00:00:00Z&includeTotal=true
 GET /api/audit?action=Deleted&actorMissing=true
 GET /api/audit?correlationId=00-7c1f…-01          # the other halves of one edit
+GET /api/audit?take=50&after=MjAyNi0xMC0x…         # the page after the last one read
 ```
+
+**Walk a trail with `after`, not `skip`.** An offset makes the database read and discard everything
+before the page, so page 4,000 costs 200,000 rows to serve — on the one table in the application
+that only grows. It is also unstable: an entry arriving between two requests shifts every later row
+by one, so a client sees a row twice and misses another. A cursor costs the same at any depth, and
+an insert cannot move a row across a boundary defined by the rows themselves.
+
+`skip` is still there and still right for a UI with numbered pages, which genuinely needs to jump to
+page 7 and is never deep — the dashboard in `clients/dashboard` uses it for exactly that.
 
 | Parameter | |
 |---|---|
@@ -83,6 +93,7 @@ GET /api/audit?correlationId=00-7c1f…-01          # the other halves of one ed
 | `correlationId` | The other entries of the same edit |
 | `from`, `to` | UTC. `from` is inclusive, `to` is **exclusive**, so consecutive windows do not double-count |
 | `skip`, `take` | `take` is clamped to `maxPageSize` (which `GET /api/audit/entities` publishes); omitting it gives the configured default, never everything |
+| `after` | The `nextCursor` from a previous page — **prefer this to `skip` for walking a trail.** A token this API issued; anything else is a `400`. Sending `after` and a non-zero `skip` together is a `400` too |
 | `includeTotal` | Count the matches as well. Off by default: it is a second pass over the index |
 | `includeChanges` | On by default. Turn it off for a wide window, where property rows outnumber entries |
 
@@ -107,7 +118,8 @@ The response reports the page it actually served:
   ],
   "total": null,
   "skip": 0,
-  "take": 1
+  "take": 1,
+  "nextCursor": "MjAyNi0xMC0xN1QwOTozMDowMC4wMDAwMDAwWnw3ZDFiLi4u"
 }
 ```
 
@@ -116,6 +128,10 @@ The response reports the page it actually served:
 - `total` is `null` when no count was asked for. **`null` means not counted, never zero** — a client
   must not paginate against it.
 - `take` is the size served, after clamping. A client that asked for more finds out here.
+- `nextCursor` is where this page ended. Send it as `?after=` for the next one. **It is not a
+  promise that more exist** — the last full page carries one and the request after it comes back
+  empty, with `nextCursor` null. Knowing in advance would mean reading a row past every page to
+  answer a question most callers never ask.
 - `isRedacted` means the two nulls are "not disclosed" rather than "was empty". Say so in the UI
   rather than rendering a blank — and the values are not in the response at all, which a test
   asserts against the whole body rather than the parsed shape.

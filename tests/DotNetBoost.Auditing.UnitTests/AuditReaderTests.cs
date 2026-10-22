@@ -20,6 +20,74 @@ public class AuditReaderTests
     }
 
     [Fact]
+    public async Task A_cursor_reaches_the_store_and_the_page_carries_the_next_one()
+    {
+        var (reader, store) = Build();
+
+        var newest = new AuditEntry
+        {
+            Id            = Guid.NewGuid(),
+            EntityName    = "Product",
+            EntityId      = "1",
+            Action        = AuditAction.Updated,
+            CorrelationId = "c1",
+            OccurredAt    = new DateTime(2026, 10, 22, 9, 30, 0, DateTimeKind.Utc)
+        };
+
+        await store.SeedAsync(newest);
+
+        var cursor = new AuditCursor(newest.OccurredAt.AddHours(1), Guid.NewGuid());
+        var page   = await reader.QueryAsync(new AuditQuery { After = cursor });
+
+        // Passed through the clamp untouched — it is not a size, so there is nothing to clamp.
+        Assert.Equal(cursor, store.LastQuery!.After);
+
+        // And the page says where it ended, so a caller can ask for the next one without knowing
+        // how a cursor is built.
+        Assert.Equal(AuditCursor.Of(newest), page.NextCursor);
+    }
+
+    [Fact]
+    public async Task An_empty_page_carries_no_cursor_because_the_walk_is_over()
+    {
+        var (reader, _) = Build();
+
+        var page = await reader.QueryAsync(new AuditQuery());
+
+        Assert.Empty(page.Entries);
+        Assert.Null(page.NextCursor);
+    }
+
+    [Fact]
+    public async Task Skip_and_After_together_are_refused_rather_than_one_winning()
+    {
+        var (reader, store) = Build();
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => reader.QueryAsync(new AuditQuery
+        {
+            Skip  = 10,
+            After = new AuditCursor(DateTime.UtcNow, Guid.NewGuid())
+        }));
+
+        Assert.Contains("Skip and After", error.Message, StringComparison.Ordinal);
+
+        // Nothing reached the store: a read that paged from the wrong place would be wrong quietly.
+        Assert.Null(store.LastQuery);
+    }
+
+    [Fact]
+    public async Task A_cursor_with_skip_zero_is_not_a_contradiction()
+    {
+        var (reader, store) = Build();
+
+        // Skip defaults to zero, so requiring it to be unset would make After unusable with any
+        // query built by `with`.
+        await reader.QueryAsync(new AuditQuery { Skip = 0, After = new AuditCursor(DateTime.UtcNow, Guid.NewGuid()) });
+
+        Assert.NotNull(store.LastQuery!.After);
+    }
+
+    [Fact]
     public async Task An_unset_take_becomes_the_default_page_size_not_everything()
     {
         var (reader, store) = Build(o => o.DefaultPageSize = 25);

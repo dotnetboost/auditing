@@ -271,6 +271,66 @@ public class EndpointTests
     }
 
     [Fact]
+    public async Task A_trail_can_be_walked_with_the_cursor_each_page_returns()
+    {
+        await using var api = await ApiHarness.StartAsync();
+
+        for (var i = 1; i <= 5; i++)
+            await api.CreateProductAsync($"Product {i}");
+
+        var seen   = new List<Guid>();
+        string? after = null;
+
+        for (var request = 0; request < 10; request++)
+        {
+            var url  = after is null ? "/api/audit?take=2" : $"/api/audit?take=2&after={Uri.EscapeDataString(after)}";
+            var page = await PageAsync(await api.GetAsync(url));
+
+            if (page.Entries.Count == 0)
+            {
+                // The walk ends with an empty page, and that page has no cursor to follow.
+                Assert.Null(page.NextCursor);
+                break;
+            }
+
+            seen.AddRange(page.Entries.Select(e => e.Id));
+            Assert.NotNull(page.NextCursor);
+            after = page.NextCursor;
+        }
+
+        // Every entry once: five creations, no row seen twice and none missed at a page boundary.
+        Assert.Equal(5, seen.Count);
+        Assert.Equal(5, seen.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task A_cursor_the_api_did_not_issue_is_the_clients_mistake()
+    {
+        await using var api = await ApiHarness.StartAsync();
+        await api.CreateProductAsync();
+
+        var response = await api.GetAsync("/api/audit?after=not-a-cursor");
+
+        // 400 rather than silently serving the newest page: a client paging a long trail would
+        // otherwise loop over page one for ever with nothing to explain why.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Asking_for_a_cursor_and_an_offset_at_once_is_refused()
+    {
+        await using var api = await ApiHarness.StartAsync();
+        await api.CreateProductAsync();
+
+        var first  = await PageAsync(await api.GetAsync("/api/audit?take=1"));
+        var both   = await api.GetAsync($"/api/audit?skip=1&after={Uri.EscapeDataString(first.NextCursor!)}");
+
+        // Two answers to where the page starts. Either could be the one the client meant, so
+        // neither is guessed at.
+        Assert.Equal(HttpStatusCode.BadRequest, both.StatusCode);
+    }
+
+    [Fact]
     public async Task The_destructive_endpoints_are_not_mapped_by_default()
     {
         await using var api = await ApiHarness.StartAsync();
