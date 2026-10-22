@@ -9,7 +9,7 @@ The layout is the one `DotNetBoost.Settings`, `.Media` and `.MultiLingual` use â
 |---|---|---|---|
 | `TestSupport` | â€” | net8.0, net10.0 | The shared doubles and conformance suites. Not a test project |
 | `UnitTests` | 181 | net8.0, net10.0 | Nothing. The Core engine, over the in-memory double |
-| `ProviderTests` | 230 | net8.0, net10.0 | Nothing. Every store, over SQLite |
+| `ProviderTests` | 233 | net8.0, net10.0 | Nothing. Every store, over SQLite |
 | `ApiTests` | 59 | net8.0, net10.0 | Nothing. A real ASP.NET Core host |
 | `SurfaceTests` | 7 | net8.0, net10.0 | Nothing. The public surface of all five packages, against a committed baseline |
 | `IntegrationTests` | 198 | net10.0 | **Docker.** PostgreSQL 16, SQL Server 2022, MongoDB 7 (replica set) |

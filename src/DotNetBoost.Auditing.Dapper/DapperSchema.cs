@@ -52,27 +52,30 @@ public static class DapperSchema
         var dialect = options.Dialect ?? AuditStatements.DialectOf(connection);
         var script  = Script(dialect, options);
 
-        var opened = await UnitOfWork.OpenIfClosedAsync(connection, ct).ConfigureAwait(false);
-
-        try
-        {
-            await connection
-                .ExecuteAsync(new CommandDefinition(script, cancellationToken: ct))
-                .ConfigureAwait(false);
-        }
-        catch (DbException ex)
-        {
-            throw new InvalidOperationException(
-                $"Could not create the audit tables ('{options.EntriesTable}', '{options.ChangesTable}'). " +
-                "The database role needs CREATE TABLE and CREATE INDEX rights. Pass " +
-                "migrateSchema: false to UseDapper(...) if the schema is managed elsewhere.",
-                ex);
-        }
-        finally
-        {
-            if (opened)
-                connection.Close();
-        }
+        // Through the gate like every other statement this package issues: the bootstrap runs at
+        // startup and is unlikely to meet a recording, but "unlikely" was also true of the race
+        // this gate exists to close, and there is nothing to gain by being the one exception.
+        await UnitOfWork.RunAsync(
+            connection,
+            async () =>
+            {
+                try
+                {
+                    await connection
+                        .ExecuteAsync(new CommandDefinition(script, cancellationToken: ct))
+                        .ConfigureAwait(false);
+                }
+                catch (DbException ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Could not create the audit tables ('{options.EntriesTable}', '{options.ChangesTable}'). " +
+                        "The database role needs CREATE TABLE and CREATE INDEX rights. Pass " +
+                        "migrateSchema: false to UseDapper(...) if the schema is managed elsewhere.",
+                        ex);
+                }
+            },
+            ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

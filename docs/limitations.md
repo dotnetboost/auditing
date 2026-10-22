@@ -180,12 +180,48 @@ Multi-document transactions are a replica-set feature, so a standalone `mongod` 
 atomic with the application's own write. A single entry is still written whole in one insert, because
 its property changes are embedded.
 
+## One connection, one operation at a time
+
+The Dapper store borrows the scope's `IDbConnection`, which the application can inject as well — and
+an ADO.NET connection cannot run two commands at once. So two audited operations sharing a
+connection have to take turns, and the store now makes them: it serialises its own work per
+connection, so a second write queues behind the first instead of colliding with it.
+
+That is a fix, not a design note. Borrowing meant "open it if it is closed, close it if I opened it",
+which is a check-then-act on shared state: two concurrent writes could both find the connection
+closed, both open it, and then the first to finish would close it while the second was still issuing
+statements. The window is as wide as a connection takes to open — a network round trip for anything
+but SQLite. Against SQLite it produced `ArgumentNullException: SafeHandle cannot be null` from inside
+the native driver and wrote **40 of 20,001 entries**: a meaningless error and a half-written trail.
+`ProviderTests` has that scenario.
+
+**What the fix cannot cover.** The store only knows about its own operations. If the application
+runs its own commands on that same connection at the same time — a `Task.WhenAll` over two
+repositories that share the scope's connection — that is still two commands on one connection, and
+no amount of locking inside this library makes it legal. **Give parallel work its own scope**, and
+with it its own connection.
+
+## An erasure finishes when the trail is empty, not at a cutoff
+
+A prune is bounded: its cutoff is computed once, so entries written during the sweep are newer than
+it and the sweep is finite by construction. Erasure has no cutoff — it deletes a batch at a time
+until a batch comes back short — so it finishes when that entity's or actor's trail is momentarily
+empty. An actor who is *still recording* therefore extends their own erasure.
+
+In practice that is arithmetic rather than a risk: a batch deletes a thousand entries in one round
+trip, so outpacing it would take something like a hundred thousand entries per second for one actor.
+The reachable cost is duration, not non-termination — a large erasure is many round trips and holds
+its caller, including an HTTP request, for the whole sweep. There is deliberately **no test** for
+the live-writer case: the first attempt at one was a lock-contention storm that said more about
+SQLite's single writer than about this loop, and a flaky test here would be worse than the note.
+
 ## Not tested under concurrency or at scale
 
-Every store is exercised against its real engine — see [testing.md](testing.md) — but nothing yet
-writes from several connections at once, so behaviour under contention is untested rather than
-known. Nor has anything put a million entries in a table: the prune is batched and the indexes are
-chosen for the reads the library issues, but that choice is reasoning, not measurement.
+Several connections writing at once is now covered for the one case that was a defect — see above —
+but not generally: nothing yet has several scopes recording, pruning and reading at the same time
+against a real engine. Nor has anything put a million entries in a table: the prune is batched and
+the indexes are chosen for the reads the library issues, but that choice is reasoning, not
+measurement.
 
 ## MySQL and MariaDB are not supported
 

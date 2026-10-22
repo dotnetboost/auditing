@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 477 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 480 tests on net8.0 and
 net10.0 needing nothing installed, plus 198 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -174,6 +174,35 @@ MongoDB in containers.
   takes a restart. The documentation now says that, and says what you *can* do — read it from
   configuration when registering — rather than promising a runtime switch the engine does not have.
   It was the last place in the library where the docs described behaviour the code does not have.
+
+- **Fixed: two audited writes on one connection could corrupt each other.** The Dapper store
+  borrows the scope's `IDbConnection` — which the application can inject too — with "open it if it
+  is closed, close it if I opened it". That is a check-then-act on shared state: two concurrent
+  writes could both find it closed, both open it, and then the first to finish would close it while
+  the second was still issuing statements. The window is as wide as a connection takes to open, a
+  network round trip for anything but SQLite, which makes it one of the easier races to lose rather
+  than a theoretical one.
+  - What it cost, reproduced: `ArgumentNullException: SafeHandle cannot be null` from inside the
+    native SQLite driver, and **40 of 20,001 entries written**. A meaningless error and a
+    half-written trail, which for an auditing library is the worst available pair of outcomes.
+  - The store now serialises its own operations per connection, so a second write queues behind the
+    first. That is not a performance decision: an ADO.NET connection cannot run two commands at
+    once, so the two have to take turns whatever the library does — the only question was whether
+    they take turns or corrupt each other. The schema bootstrap goes through the same gate.
+  - It cannot cover the application running *its own* commands on that connection concurrently with
+    the library; nothing inside this library can. [limitations.md](docs/limitations.md) says so, and
+    says to give parallel work its own scope.
+  - Three tests: the ordering invariant, deterministic and with no sleeps; the end-to-end scenario
+    above, which fails two ways out of three without the fix on every run; and that a connection the
+    *application* opened is still never closed by the store.
+
+- **Documented: an erasure finishes when the trail is empty, not at a cutoff.** A prune's cutoff is
+  fixed at the start, so it is finite by construction; erasure has no cutoff, so an actor who is
+  still recording extends their own erasure. Arithmetic rather than a risk — a batch deletes a
+  thousand entries per round trip — and the reachable cost is duration rather than non-termination.
+  Deliberately untested: the first attempt at a live-writer test was a lock-contention storm that
+  said more about SQLite's single writer than about the loop, and a flaky test there would be worse
+  than the note.
 
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the
