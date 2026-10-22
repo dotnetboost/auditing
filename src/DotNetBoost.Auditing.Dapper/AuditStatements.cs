@@ -146,6 +146,37 @@ internal sealed class AuditStatements
     };
 
     /// <summary>
+    /// A predicate matching the rows that sort <b>after</b> a cursor in this store's ordering —
+    /// older, and at the same instant a smaller id.
+    /// </summary>
+    /// <remarks>
+    /// <b>Two spellings, and the difference is 120-fold.</b> The portable form is
+    /// <c>a &lt; @a OR (a = @a AND b &lt; @b)</c>, and a planner cannot collapse an OR into an index
+    /// range: PostgreSQL scans the <c>OccurredAt</c> index backwards with the whole predicate as a
+    /// <i>Filter</i>, so the deeper the page the more rows it reads and discards — which is exactly
+    /// the cost paging by cursor was added to avoid.
+    /// <para>
+    /// The row-value form <c>(a, b) &lt; (@a, @b)</c> becomes an <c>Index Cond</c> instead, and the
+    /// scan starts at the cursor. Measured at depth 500,000 of a million-entry trail on PostgreSQL
+    /// 16: <b>23.9ms for the OR, 0.2ms for the row value</b> — see <c>ScaleTests</c>. So the
+    /// row-value form is used wherever the engine has it, which is everywhere except SQL Server.
+    /// </para>
+    /// <para>
+    /// Both forms mean the same thing, and the cursor tests in the conformance suite run against
+    /// every store and engine, so the two are held to one behaviour rather than trusted to agree.
+    /// </para>
+    /// </remarks>
+    internal string AfterCursor(string occurredAt, string id, string atParameter, string idParameter) =>
+        Dialect switch
+        {
+            // SQL Server has no row-value comparison, so it keeps the portable form and its scan.
+            SqlDialect.SqlServer =>
+                $"({occurredAt} < {atParameter} OR ({occurredAt} = {atParameter} AND {id} < {idParameter}))",
+
+            _ => $"(({occurredAt}, {id}) < ({atParameter}, {idParameter}))"
+        };
+
+    /// <summary>
     /// The negation of <see cref="AnyOf(string, string)"/>, for the same reason and with the same
     /// per-dialect spelling.
     /// </summary>

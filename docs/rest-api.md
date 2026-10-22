@@ -78,8 +78,11 @@ GET /api/audit?take=50&after=MjAyNi0xMC0x…         # the page after the last o
 **Walk a trail with `after`, not `skip`.** An offset makes the database read and discard everything
 before the page, so page 4,000 costs 200,000 rows to serve — on the one table in the application
 that only grows. It is also unstable: an entry arriving between two requests shifts every later row
-by one, so a client sees a row twice and misses another. A cursor costs the same at any depth, and
-an insert cannot move a row across a boundary defined by the rows themselves.
+by one, so a client sees a row twice and misses another. An insert cannot move a row across a
+boundary defined by the rows themselves, and the page does not get dearer with depth: measured at
+depth 500,000 of a million-entry trail, 0.1ms by cursor against 36ms by offset. On SQL Server the
+stability holds but the flat cost does not — see
+[limitations.md](limitations.md#deep-paging-on-sql-server-is-not-constant-cost).
 
 `skip` is still there and still right for a UI with numbered pages, which genuinely needs to jump to
 page 7 and is never deep — the dashboard in `clients/dashboard` uses it for exactly that.

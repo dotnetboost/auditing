@@ -23,8 +23,17 @@ namespace DotNetBoost.Auditing.Core.Models;
 /// read and discard everything it skips, so page 4,000 of a trail costs 200,000 rows to serve — on
 /// the one table in the application that only ever grows. Worse, it is not stable: an entry arriving
 /// between two requests shifts every later row by one, so a reader paging a live trail sees a row
-/// twice and misses another. A cursor costs the same as the first page however deep it goes, and an
-/// insert cannot move a row across a boundary that is defined by the rows themselves.
+/// twice and misses another. An insert cannot move a row across a boundary that is defined by the
+/// rows themselves, and the page costs what the first page costs — measured at depth 500,000 of a
+/// million-entry trail on PostgreSQL: 0.1ms by cursor against 36ms by offset.
+/// <para>
+/// <b>The flat cost needs the engine's help, and SQL Server does not give it.</b> The keyset
+/// predicate is spelled as a row-value comparison where the engine has one, which becomes an index
+/// seek; SQL Server has none and gets the portable <c>OR</c> form, which the planner applies as a
+/// filter over an index scan, so a deeper page there reads more rows. Stability is unaffected — it
+/// is a property of what a cursor <i>is</i>, not of how the predicate is written — so a cursor is
+/// still the right way to walk a trail on SQL Server. See <c>docs/limitations.md</c>.
+/// </para>
 /// <para>
 /// It works because the sort every store already uses — <c>OccurredAt</c> descending with
 /// <c>Id</c> as the tiebreaker — is a <i>total</i> order. Without the tiebreaker two entries

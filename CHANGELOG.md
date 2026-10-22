@@ -175,6 +175,32 @@ MongoDB in containers.
   configuration when registering — rather than promising a runtime switch the engine does not have.
   It was the last place in the library where the docs described behaviour the code does not have.
 
+- **Scale is measured, and the measurement found a defect.** `ScaleTests` builds a million-entry
+  trail and times four things on PostgreSQL 16. It is skipped unless `DOTNETBOOST_SCALE=run` is set
+  and is not in the CI workflow's list of test projects, because a benchmark is not a gate: the
+  numbers move with the machine, and failing a build on them would mean failing builds nobody can
+  act on. What it produces is a dated paragraph in [testing.md](docs/testing.md) with the hardware
+  named, so a reader can tell measurement from reasoning.
+  - **The keyset predicate was costing 120-fold more than it needed to.** The first run measured
+    23ms for a page at depth 500,000 and 116 seconds to walk there — nothing like the constant cost
+    the documentation claimed. `EXPLAIN` said why: the portable
+    `a < @a OR (a = @a AND b < @b)` reaches the planner as a **Filter** on an index scan, so a
+    deeper page reads and discards more rows, while the row-value form `(a, b) < (@a, @b)` becomes
+    an **Index Cond** and seeks. The Dapper store now issues row values wherever the engine has
+    them; the same page went **23ms → 0.1ms** and the walk **116s → 1.4s**. SQL Server has no
+    row-value comparison and keeps the OR, so the flat cost does not hold there — stability does,
+    because that is a property of what a cursor is rather than of how the predicate is written.
+  - The prune is vindicated: 913,613 entries in 914 batches took 7.1s, 8ms mean per batch and
+    **49ms slowest** — and the slowest single batch is the number the batching exists to bound,
+    because it is the longest a recording can be waiting behind a sweep.
+  - Both indexes earn their place against a selective question: one entity's newest 50 is 1.3ms
+    against 19.9ms with the candidate indexes dropped, and a rare property's changes 0.5ms against
+    13.1ms.
+  - **Two of the four measurements were wrong on the first run, in the direction that flattered the
+    library**, and the comments now say what they used to measure: dropping one index left a second
+    that could serve the same read, and the per-property query asked for half the table, where a
+    sequential scan beating an index is correct behaviour and evidence about nothing.
+
 - **Concurrency is tested, against PostgreSQL.** Four tests for what happens when several things
   use a trail at once: eight writers on their own connections, eight scopes saving through the EF
   Core interceptor at the same time — every one down the deferred path, which is the most intricate

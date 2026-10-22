@@ -123,7 +123,7 @@ namespace DotNetBoost.Auditing.API
         /// <para>
         /// <b>Not a promise that more exist</b> — it is where this page ended. The last full page
         /// carries one, and the request after it comes back empty. Prefer it to <c>skip</c> for
-        /// walking a trail: it costs the same at any depth, and an entry arriving between two
+        /// walking a trail: it does not get dearer with depth, and an entry arriving between two
         /// requests cannot shift a row across a page boundary and make a client see it twice.
         /// </para>
         /// </summary>

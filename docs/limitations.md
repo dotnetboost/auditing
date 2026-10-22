@@ -215,16 +215,18 @@ its caller, including an HTTP request, for the whole sweep. There is deliberatel
 the live-writer case: the first attempt at one was a lock-contention storm that said more about
 SQLite's single writer than about this loop, and a flaky test here would be worse than the note.
 
-## Not tested at scale
+## Deep paging on SQL Server is not constant-cost
 
-Concurrency is now covered against PostgreSQL — eight writers on their own connections, eight
-scopes saving through the interceptor at once, a prune running while recording continues, and a
-cursor walk with entries arriving between every page. See [testing.md](testing.md).
+A cursor is meant to cost the same at any depth, and on PostgreSQL and SQLite it does — the keyset
+predicate is the row-value form `(OccurredAt, Id) < (@at, @id)`, which the engine turns into an
+index seek. **SQL Server has no row-value comparison**, so it gets the portable
+`a < @a OR (a = @a AND b < @b)` instead, which reaches the planner as a filter on an index scan: a
+deeper page reads and discards more rows. A cursor is still the right way to walk a trail there —
+it is stable where an offset is not — but the cost is not flat.
 
-What is still reasoning rather than measurement is **scale**: nothing has put a million entries in
-a table. The prune is batched and the indexes are chosen for the reads the library issues, but no
-one has timed either. That belongs in a benchmark run before a release rather than in a suite that
-runs on every push, and it has not been written.
+Measured on PostgreSQL, where the difference between the two forms at depth 500,000 of a
+million-entry trail was 23ms against 0.1ms. The SQL Server figure is **unmeasured**: the benchmark
+only runs PostgreSQL. See [testing.md](testing.md).
 
 ## MySQL and MariaDB are not supported
 

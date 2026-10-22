@@ -472,12 +472,12 @@ public sealed class DapperAuditStore(
         if (query.After is { } cursor)
         {
             // Everything strictly after the cursor in the ORDER BY this store issues: newest first,
-            // so "after" is older, and at the same instant a smaller id. Spelled as OR rather than
-            // the row-value form (a, b) < (x, y), which PostgreSQL has and SQL Server does not.
+            // so "after" is older, and at the same instant a smaller id. Which way that is spelled
+            // decides whether the engine seeks or scans — see AuditStatements.AfterCursor, where
+            // the two forms differ by 120-fold at depth.
             where.Append(
                 CultureInfo.InvariantCulture,
-                $"AND ({sql.Column("OccurredAt")} < @AfterAt OR ({sql.Column("OccurredAt")} = @AfterAt " +
-                $"AND {sql.Column("Id")} < @AfterId)) ");
+                $"AND {sql.AfterCursor(sql.Column("OccurredAt"), sql.Column("Id"), "@AfterAt", "@AfterId")} ");
 
             parameters.Add("AfterAt", AuditRows.Utc(cursor.OccurredAt));
             parameters.Add("AfterId", cursor.Id);

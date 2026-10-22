@@ -29,8 +29,9 @@ internal sealed class AuditReader(
         {
             throw new ArgumentException(
                 "A query sets both Skip and After, which are two ways of saying where the page starts. " +
-                "Use After to walk a trail — it costs the same at any depth and an entry arriving " +
-                "mid-walk cannot shift a row across a boundary — or Skip to jump to a page number.",
+                "Use After to walk a trail — an entry arriving mid-walk cannot shift a row across a " +
+                "page boundary, and the read does not get dearer with depth — or Skip to jump to a " +
+                "page number.",
                 nameof(query));
         }
 

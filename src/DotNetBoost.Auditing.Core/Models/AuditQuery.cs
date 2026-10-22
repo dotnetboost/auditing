@@ -59,8 +59,9 @@ public sealed record AuditQuery
     /// Read the page <b>after</b> this position instead of at an offset — see
     /// <see cref="AuditCursor"/>. <see cref="AuditPage.NextCursor"/> carries the one to pass next.
     /// <para>
-    /// Costs the same however deep into a trail it goes, and an entry arriving between two requests
-    /// cannot shift a row across a page boundary. Set with <see cref="Skip"/> it is refused rather
+    /// An entry arriving between two requests cannot shift a row across a page boundary, and on an
+    /// engine with row-value comparison the page costs what the first page costs however deep it is
+    /// — see <see cref="AuditCursor"/> for the one engine where the second half does not hold. Set with <see cref="Skip"/> it is refused rather
     /// than one silently winning: they are two answers to "where does this page start", and a read
     /// that quietly ignored one of them would page wrongly in a way nobody would notice.
     /// </para>
