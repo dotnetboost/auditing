@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 470 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 477 tests on net8.0 and
 net10.0 needing nothing installed, plus 198 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -151,6 +151,29 @@ MongoDB in containers.
   - Over HTTP: `?after=` and `nextCursor` on the page. A malformed cursor is a `400` rather than the
     newest page, which would have left a client looping over page one for ever with nothing to
     explain why.
+
+- **The public surface is a committed file.** Five packages expose fifty-odd public types between
+  them and nothing in the build objected when one more appeared, so a type added in passing became a
+  compatibility commitment nobody decided to make — a live risk, since four public types were added
+  while this changelog entry's siblings were being written. `SurfaceTests` renders each package's
+  surface and compares it to `PublicApi.txt` beside that project, so every addition, removal and
+  re-signing turns up as a diff next to the code that caused it, with `DOTNETBOOST_SURFACE=update`
+  to accept one deliberately.
+  - Not `Microsoft.CodeAnalysis.PublicApiAnalyzers`, which is the standard answer and fails the
+    build rather than the suite — better, except that its baseline can only be *created* by its IDE
+    code fix (`dotnet format` does not apply it), and a file regenerable only inside an IDE does not
+    belong in a repository driven entirely from the command line.
+  - Rendering the format here bought two things the analyzer would not have given: the baselines are
+    shared between both shipped frameworks, so a member present on net10.0 and absent on net8.0
+    fails on the run that disagrees; and the text reads as C#, because the point is that a person
+    reviews the diff. Fully qualified and carrying nullability, so a namespace move and a `string` →
+    `string?` both show up — the two surface breaks that are easiest to make by accident.
+
+- **`AuditingOptions.Enabled` no longer claims to be flippable from configuration.** It never was:
+  there is no binding and no `IOptionsMonitor`, so the value is read once at startup and changing it
+  takes a restart. The documentation now says that, and says what you *can* do — read it from
+  configuration when registering — rather than promising a runtime switch the engine does not have.
+  It was the last place in the library where the docs described behaviour the code does not have.
 
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the

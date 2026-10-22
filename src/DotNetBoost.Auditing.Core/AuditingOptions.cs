@@ -14,9 +14,15 @@ public sealed class AuditingOptions
     private TimeSpan? _retention;
 
     /// <summary>
-    /// Whether anything is recorded at all. A kill switch for an incident, flippable from
-    /// configuration without removing the registration — the recorder stays resolvable and returns
-    /// <c>null</c> from every call.
+    /// Whether anything is recorded at all. A kill switch for an incident, which stops recording
+    /// without removing the registration — the engine stays resolvable and returns <c>null</c> from
+    /// every call, reporting <see cref="Models.AuditSuppression.RecordingDisabled"/> as it does.
+    /// <para>
+    /// <b>Settable at startup, not at runtime.</b> Read it from configuration if you like —
+    /// <c>AddAuditing(o =&gt; o.Enabled = config.GetValue&lt;bool&gt;("Auditing:Enabled"))</c> — but
+    /// there is no <c>IOptionsMonitor</c> behind it, so a change takes a restart. It is the switch
+    /// you set while deploying a fix, not one you flip to stop a trail mid-incident.
+    /// </para>
     /// <para>
     /// Reads are unaffected: turning recording off must not hide the trail already collected.
     /// </para>

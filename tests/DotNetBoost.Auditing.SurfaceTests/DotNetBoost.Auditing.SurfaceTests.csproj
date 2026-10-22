@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!--
+      Both shipped TFMs, deliberately: the baseline files are shared, so a public member that
+      exists on one framework and not the other fails on whichever run disagrees. That is a real
+      risk in a multi-targeted library and nothing else in the suite covers it.
+    -->
+    <TargetFramework />
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Every shipped package, because the surface being pinned is all five together. -->
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Core/DotNetBoost.Auditing.Core.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.API/DotNetBoost.Auditing.API.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.Dapper/DotNetBoost.Auditing.Dapper.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.EntityFrameworkCore/DotNetBoost.Auditing.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../src/DotNetBoost.Auditing.MongoDb/DotNetBoost.Auditing.MongoDb.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+</Project>

@@ -11,6 +11,7 @@ The layout is the one `DotNetBoost.Settings`, `.Media` and `.MultiLingual` use �
 | `UnitTests` | 181 | net8.0, net10.0 | Nothing. The Core engine, over the in-memory double |
 | `ProviderTests` | 230 | net8.0, net10.0 | Nothing. Every store, over SQLite |
 | `ApiTests` | 59 | net8.0, net10.0 | Nothing. A real ASP.NET Core host |
+| `SurfaceTests` | 7 | net8.0, net10.0 | Nothing. The public surface of all five packages, against a committed baseline |
 | `IntegrationTests` | 198 | net10.0 | **Docker.** PostgreSQL 16, SQL Server 2022, MongoDB 7 (replica set) |
 
 ```bash
@@ -18,6 +19,36 @@ dotnet test                                                   # everything — 5
 dotnet test tests/DotNetBoost.Auditing.IntegrationTests       # containers only
 dotnet test --filter "FullyQualifiedName!~SqlServer"          # skip the slow fixture
 ```
+
+## The public surface is a committed file
+
+Five packages expose fifty-odd public types between them, and nothing in a build objects when one
+more appears — so a type added in passing silently becomes a compatibility commitment nobody decided
+to make. `SurfaceTests` renders each package's public surface and compares it to `PublicApi.txt`
+beside that project, so every addition, removal and re-signing turns up as a diff on a file next to
+the code that caused it:
+
+```bash
+# an intended change, once you have read the diff
+DOTNETBOOST_SURFACE=update dotnet test tests/DotNetBoost.Auditing.SurfaceTests
+```
+
+On a mismatch the suite writes `PublicApi.txt.actual` next to the baseline and names what moved, so
+the question "what changed" is answered by diffing two files rather than by reading an assertion
+message.
+
+It is **not** `Microsoft.CodeAnalysis.PublicApiAnalyzers`, which is the standard answer and fails
+the build rather than the suite. Its baseline can only be *created* by its IDE code fix —
+`dotnet format` does not apply it — and a file that can only be regenerated inside an IDE does not
+belong in a repository that is otherwise driven entirely from the command line. Rendering the format
+here also bought two things the analyzer would not have: the baselines are **shared between both
+shipped frameworks**, so a public member that exists on net10.0 and not net8.0 fails on the run that
+disagrees; and the text reads as C#, because the point is that a person reviews the diff.
+
+The surface is fully qualified and carries nullability, both of which cost verbosity in a file
+nobody reads top to bottom and buy a change that would otherwise pass: moving a public type to
+another namespace breaks every `using` that named it, and turning a `string` into a `string?` breaks
+callers who never checked for null.
 
 ## The contract suite runs at both levels
 
