@@ -8,9 +8,9 @@ The layout is the one `DotNetBoost.Settings`, `.Media` and `.MultiLingual` use â
 | Project | Tests | TFMs | Needs |
 |---|---|---|---|
 | `TestSupport` | â€” | net8.0, net10.0 | The shared doubles and conformance suites. Not a test project |
-| `UnitTests` | 161 | net8.0, net10.0 | Nothing. The Core engine, over the in-memory double |
+| `UnitTests` | 166 | net8.0, net10.0 | Nothing. The Core engine, over the in-memory double |
 | `ProviderTests` | 218 | net8.0, net10.0 | Nothing. Every store, over SQLite |
-| `ApiTests` | 54 | net8.0, net10.0 | Nothing. A real ASP.NET Core host |
+| `ApiTests` | 56 | net8.0, net10.0 | Nothing. A real ASP.NET Core host |
 | `IntegrationTests` | 178 | net10.0 | **Docker.** PostgreSQL 16, SQL Server 2022, MongoDB 7 (replica set) |
 
 ```bash

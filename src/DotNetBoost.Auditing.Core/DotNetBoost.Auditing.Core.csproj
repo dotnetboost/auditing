@@ -4,15 +4,16 @@
     <Description>
       Core abstractions and engine for DotNetBoost.Auditing — who changed what, when, and from
       what to what, for any entity in the application, in two tables with no column on your
-      entities. Includes IAuditRecorder (the one service application code injects), the store
-      contract (IAuditStore), the reader and the pruner, plus the store-neutral recording path:
-      entity addressing, actor capture, correlation, per-type ignore and redaction rules, and
-      value truncation. Depends on no other DotNetBoost package.
+      entities. Includes IAuditManager (the one service application code injects), the store
+      contract (IAuditStore), IAuditObserver for finding out what was deliberately not recorded,
+      plus the store-neutral recording path: entity addressing, actor capture, correlation,
+      per-type ignore and redaction rules, and value truncation. Depends on no other DotNetBoost
+      package, and on one NuGet package in total.
     </Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The engine services are internal: applications use IAuditRecorder. The sibling packages
+    <!-- The engine services are internal: applications use IAuditManager. The sibling packages
          build on the engine directly, as the stores do. -->
     <InternalsVisibleTo Include="DotNetBoost.Auditing.EntityFrameworkCore" />
     <InternalsVisibleTo Include="DotNetBoost.Auditing.Dapper" />
@@ -27,9 +28,11 @@
   <ItemGroup>
     <!--
       The only dependency, and the whole of it. No logging, no hosting, no options-pattern
-      package: the engine validates its options at Build() rather than through a hosted service,
-      and it has nothing to say at runtime that is not either a thrown exception or a recorded
-      entry. An application installing an auditing library should not acquire a dependency graph.
+      package: the engine validates its options at Build() rather than through a hosted service.
+      What it has to say at runtime that is neither a thrown exception nor a recorded entry goes
+      to IAuditObserver, which an application implements, and to counters on the meter named by
+      AuditingTelemetry.MeterName — the types for both are in the framework, so neither costs a
+      package. An application installing an auditing library should not acquire a dependency graph.
     -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>

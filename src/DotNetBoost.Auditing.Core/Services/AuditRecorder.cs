@@ -307,16 +307,27 @@ internal sealed class AuditRecorder(
             : id[..AuditColumns.CorrelationIdMaxLength];
     }
 
+    /// <summary>
+    /// <paramref name="value"/> if it is present and fits, else the exception that says which field
+    /// was wrong.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="field"/> is the <c>paramName</c>, not <c>nameof(value)</c>: the field is what
+    /// the caller passed and <c>value</c> is only what this method happens to call it. The
+    /// difference reaches a client — <c>AuditProblemFilter</c> puts <c>paramName</c> in the problem
+    /// response, so the 400 for an over-long key said <c>"parameter": "value"</c> instead of naming
+    /// <c>EntityId</c>.
+    /// </remarks>
     private static string Require(string value, string field, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
-            throw new ArgumentException($"{field} is required.", nameof(value));
+            throw new ArgumentException($"{field} is required.", field);
 
         if (value.Length > maxLength)
         {
             throw new ArgumentException(
                 $"{field} is {value.Length.ToString(CultureInfo.InvariantCulture)} characters; the column " +
-                $"holds {maxLength.ToString(CultureInfo.InvariantCulture)}.", nameof(value));
+                $"holds {maxLength.ToString(CultureInfo.InvariantCulture)}.", field);
         }
 
         return value;

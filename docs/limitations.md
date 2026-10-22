@@ -17,6 +17,21 @@ An `Updated` or `Deleted` entity already has its key, so its entry goes in the c
 save with no transaction opened at all. **Assign keys in code** — a `Guid`, HiLo, a sequence — and
 creations join them.
 
+### The context does not know the rollback happened
+
+When that deferred write fails, the database is rolled back correctly — and the `DbContext` is
+left believing it saved. EF accepts the primary save's changes before the interceptor's
+`SavedChanges` runs, so the entity ends up `Unchanged`, holding the store-generated key the INSERT
+gave it, while the table has no such row. Measured, not inferred: `state=Unchanged`, `key=1`,
+`rowsInDb=0`.
+
+The `SaveChangesAsync` call still throws, so an application that lets the exception travel is
+fine — the write failed and it knows. The trap is catching it and carrying on with that context:
+the entity now looks saved, so a later `SaveChanges` writes nothing and the row is quietly lost.
+There is nothing the interceptor can do about it, because by then EF has already accepted the
+changes. **Do not reuse a `DbContext` after a failed save** — which is EF's own guidance, and here
+is one more reason for it.
+
 ## Two cases cannot be made atomic
 
 Both still record, rather than refusing. They are the holes in the headline guarantee:

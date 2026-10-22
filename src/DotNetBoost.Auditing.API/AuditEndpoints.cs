@@ -242,7 +242,7 @@ namespace DotNetBoost.Auditing.API
         /// <item><description><c>GET {prefix}/entities</c> — the declared entities. No entries.</description></item>
         /// <item><description><c>GET {prefix}/entities/{entityName}</c> — one entity's properties and their rules.</description></item>
         /// <item><description><c>DELETE {prefix}/entity/{entityName}/{entityId}</c> — erase one entity's trail. Opt-in.</description></item>
-        /// <item><description><c>DELETE {prefix}/actor/{actor}</c> — erase one actor's entries. Opt-in.</description></item>
+        /// <item><description><c>DELETE {prefix}/actor?actor=…</c> — erase one actor's entries. Opt-in.</description></item>
         /// <item><description><c>POST {prefix}/prune</c> — apply retention. Opt-in.</description></item>
         /// </list>
         /// <para>
@@ -312,7 +312,7 @@ namespace DotNetBoost.Auditing.API
                     .WithSummary("Erases one entity's entire trail. Irreversible.")
                     .ProducesProblem(StatusCodes.Status400BadRequest);
 
-                erasure.MapDelete("/actor/{actor}", EraseActorAsync)
+                erasure.MapDelete("/actor", EraseActorAsync)
                     .WithSummary("Erases every entry recorded against one actor. Irreversible.")
                     .ProducesProblem(StatusCodes.Status400BadRequest);
             }
@@ -514,12 +514,31 @@ namespace DotNetBoost.Auditing.API
             return TypedResults.Ok(new DeletionResponse(deleted));
         }
 
-        /// <summary><c>DELETE {prefix}/actor/{actor}</c>.</summary>
+        /// <summary>
+        /// <c>DELETE {prefix}/actor?actor=…</c> — the actor in the query string rather than in the
+        /// path.
+        /// </summary>
+        /// <remarks>
+        /// An actor is an opaque identifier the application chose, not a path segment: a subject
+        /// claim can be a URI, a Windows account carries a backslash, and either can hold a
+        /// character a path cannot. A query parameter encodes all of them.
+        /// <para>
+        /// A catch-all route would have handled slashes too, and was rejected for a different
+        /// reason: it swallows trailing segments, so <c>/actor/alice/oops</c> would erase for the
+        /// actor <c>"alice/oops"</c> and answer <c>200</c> with <c>"deleted": 0</c> — a typo
+        /// indistinguishable from a correct request for someone with no trail, on the one endpoint
+        /// where nothing can be undone.
+        /// </para>
+        /// </remarks>
         private static async Task<Ok<DeletionResponse>> EraseActorAsync(
             IAuditManager audit,
-            string actor,
+            string? actor,
             CancellationToken ct)
         {
+            // Missing or blank is the client's mistake, and says so as a 400 rather than erasing
+            // something. AuditProblemFilter maps it; the engine would refuse it anyway.
+            ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+
             var deleted = await audit.EraseForActorAsync(actor, ct).ConfigureAwait(false);
             return TypedResults.Ok(new DeletionResponse(deleted));
         }

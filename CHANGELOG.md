@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 433 tests on net8.0 and
+The first work on the library. All five packages are built and tested: 440 tests on net8.0 and
 net10.0 needing nothing installed, plus 178 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
@@ -89,6 +89,37 @@ MongoDB in containers.
   - [observability.md](docs/observability.md) is the new page for both halves — the observer and the
     counters, what each answers, and why the two misconfigurations are warnings rather than
     instruments of their own.
+
+- **Smaller corrections, each with a reason to care.**
+  - **Truncation no longer splits a surrogate pair.** Cutting a value at the configured limit could
+    leave half of one, which is not a character but invalid UTF-16 — a UTF-8 database either mangles
+    it to U+FFFD or refuses the row, so an emoji landing on the boundary could have cost the whole
+    entry. The pair is dropped instead, making the value one character shorter than the limit.
+  - **`DELETE {prefix}/actor` takes the actor as a query parameter** rather than a path segment. An
+    actor is an opaque identifier the application chose: a subject claim can be a URI and a Windows
+    account carries a backslash, neither of which addresses as a path, so those trails could not be
+    erased through the API at all. A catch-all route would have fixed the slashes and introduced a
+    worse problem — it swallows trailing segments, so `/actor/alice/oops` would have erased for
+    `"alice/oops"` and answered `200` with `"deleted": 0`, a typo indistinguishable from a correct
+    request, on the one endpoint where nothing can be undone. A missing or blank actor is now a
+    `400` rather than a request that reaches the engine.
+  - **An `ArgumentException` from the recording path names the field**, not `value`. All three
+    refusals — entity name, entity key, property name — reported `ParamName` as the engine's own
+    local name, so anything rendering it named nothing useful.
+  - **A failed assembly scan says which assembly and what to do.** `DeclareEntitiesFrom` threw
+    `ReflectionTypeLoadException` with a message that names neither. It is still a refusal rather
+    than the subset of types that did load: carrying on with those would let an `[Audited]` entity
+    among the missing ones record nothing and report nothing, which is the trade the wrong way
+    round.
+  - **The stale `IAuditRecorder` name** is gone from the two package `<Description>` elements that
+    ship to nuget.org, from Core's `InternalsVisibleTo` comment, and from the `.editorconfig`
+    justification for suppressing CA1716.
+  - **limitations.md records what the context believes after a failed deferred save.** EF accepts
+    the primary save's changes before the interceptor's `SavedChanges` runs, so when the deferred
+    write fails the database rolls back correctly while the entity is left `Unchanged` holding the
+    key the INSERT gave it. Measured rather than reasoned about. The save still throws, so the trap
+    is catching it and reusing that context — a later `SaveChanges` would write nothing and lose
+    the row.
 
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the

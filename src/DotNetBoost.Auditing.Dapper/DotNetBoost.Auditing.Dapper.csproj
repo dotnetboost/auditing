@@ -5,7 +5,7 @@
       Dapper store for DotNetBoost.Auditing, for applications that do not use EF Core. The two
       tables are the same shape the EF Core store maps — same names, lengths and indexes — so one
       database serves either. Recording is explicit rather than captured: there is no change
-      tracker to read, so entries are written through IAuditRecorder and commit with your own work
+      tracker to read, so entries are written through IAuditManager and commit with your own work
       when you hand the store your transaction. SQL written for SQL Server, PostgreSQL and SQLite.
     </Description>
   </PropertyGroup>

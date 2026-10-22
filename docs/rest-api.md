@@ -23,7 +23,7 @@ every entry's actor is honestly unknown.
 | `GET` | `/api/audit/entities` | The declared entities. No entries |
 | `GET` | `/api/audit/entities/{entityName}` | One entity's properties and their rules. No entries |
 | `DELETE` | `/api/audit/entity/{entityName}/{entityId}` | Erase one entity's trail. **Opt-in** |
-| `DELETE` | `/api/audit/actor/{actor}` | Erase one actor's entries. **Opt-in** |
+| `DELETE` | `/api/audit/actor?actor=…` | Erase one actor's entries. **Opt-in** |
 | `POST` | `/api/audit/prune` | Apply retention. **Opt-in** |
 
 Mount them anywhere with `app.MapAuditEndpoints("/admin/audit")`. The call returns the

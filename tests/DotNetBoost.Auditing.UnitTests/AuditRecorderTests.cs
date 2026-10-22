@@ -594,6 +594,30 @@ public class AuditRecorderTests
         Assert.Empty(observer.WithoutModelRules);
     }
 
+    [Theory]
+    [InlineData("EntityName")]
+    [InlineData("EntityId")]
+    [InlineData("Changes.PropertyName")]
+    public async Task A_refused_field_is_named_by_the_exception_it_throws(string field)
+    {
+        var (recorder, _) = Build();
+
+        var tooLong = new string('x', 300);
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => field switch
+        {
+            "EntityName" => recorder.For(tooLong, "1").UpdatedAsync([new AuditChange("Price", 1, 2)]),
+            "EntityId"   => recorder.For("Product", tooLong).UpdatedAsync([new AuditChange("Price", 1, 2)]),
+            _            => recorder.For("Product", "1").UpdatedAsync([new AuditChange(tooLong, 1, 2)])
+        });
+
+        // ParamName is the field the caller passed, not the engine's local name for it. It used to
+        // be nameof(value) for all three, so every one of these reported "value" — and anything
+        // rendering ParamName, a ProblemDetails or a log line, named nothing useful.
+        Assert.Equal(field, error.ParamName);
+        Assert.Contains(field, error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_default_subject_says_so_rather_than_throwing_a_null_reference() =>
         await Assert.ThrowsAsync<InvalidOperationException>(

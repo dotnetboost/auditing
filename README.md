@@ -40,7 +40,7 @@ Works with **.NET 8 and .NET 10**, on **SQL Server, PostgreSQL, SQLite or MongoD
 DotNetBoost package.
 
 > **Status:** in development, and **nothing is on NuGet yet** — the quick start below references the
-> projects in `src/`. All five packages are built and tested: **433 tests** needing nothing
+> projects in `src/`. All five packages are built and tested: **440 tests** needing nothing
 > installed, on both target frameworks, plus **178 integration tests** against **PostgreSQL 16, SQL
 > Server 2022 and MongoDB 7** in containers. See [testing.md](docs/testing.md), which also lists
 > what is not covered yet.

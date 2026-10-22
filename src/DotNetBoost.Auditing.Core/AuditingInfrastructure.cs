@@ -104,11 +104,53 @@ public sealed class AuditingBuilder
     /// controller in the registry under a name that happens to collide.
     /// </summary>
     private static IEnumerable<Type> Auditable(Assembly assembly) =>
-        assembly.GetTypes().Where(static t =>
+        TypesOf(assembly).Where(static t =>
             t is { IsClass: true, IsAbstract: false, IsPublic: true }
             && (t.GetCustomAttribute<Attributes.AuditEntityAttribute>(inherit: true) is not null
                 || t.GetCustomAttribute<Attributes.AuditedAttribute>(inherit: true) is not null
                 || t.GetCustomAttribute<Attributes.AuditRetentionAttribute>(inherit: true) is not null));
+
+    /// <summary>
+    /// <paramref name="assembly"/>'s types, or an exception that says which assembly could not be
+    /// read and what to do instead.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not the loadable subset.</b> <see cref="Assembly.GetTypes"/> throws if even one type
+    /// cannot be loaded, and <see cref="ReflectionTypeLoadException.Types"/> offers the rest — but
+    /// carrying on with those would mean an entity that is <c>[Audited]</c> going undeclared, which
+    /// under <c>RequireOptIn</c> records nothing and says nothing. Trading a startup failure for a
+    /// trail with a hole in it is the wrong way round; this library's whole argument is the other
+    /// direction.
+    /// <para>
+    /// So it is still a refusal, and only the message changes: the original says "Unable to load
+    /// one or more of the requested types" and names neither the assembly nor the way out.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">A type in <paramref name="assembly"/> cannot be loaded.</exception>
+    private static Type[] TypesOf(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException error)
+        {
+            var reasons = error.LoaderExceptions
+                .Where(e => e is not null)
+                .Select(e => e!.Message)
+                .Distinct(StringComparer.Ordinal)
+                .Take(3);
+
+            throw new InvalidOperationException(
+                $"Cannot read the types of '{assembly.GetName().Name}' to find the audited entities in it: " +
+                string.Join(" ", reasons) +
+                " Declare the entities explicitly with DeclareEntity<T>() or DeclareEntities(…) instead of " +
+                "scanning this assembly, or fix the missing reference. Scanning is refused rather than " +
+                "reduced to the types that did load, because an [Audited] entity among the ones that did " +
+                "not would then be recorded nowhere and reported nowhere.",
+                error);
+        }
+    }
 }
 
 /// <summary>
