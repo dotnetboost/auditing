@@ -39,11 +39,12 @@ Works with **.NET 8 and .NET 10**, on **SQL Server, PostgreSQL, SQLite or MongoD
 `Microsoft.Extensions.DependencyInjection.Abstractions` — and no dependency on any other
 DotNetBoost package.
 
-> **Status:** in development, and **nothing is on NuGet yet** — the quick start below references the
-> projects in `src/`. All five packages are built and tested: **480 tests** needing nothing
-> installed, on both target frameworks, plus **202 integration tests** against **PostgreSQL 16, SQL
-> Server 2022 and MongoDB 7** in containers. See [testing.md](docs/testing.md), which also lists
-> what is not covered yet.
+> **Status:** first preview on NuGet — **1.0.0-preview.1**, which is why every `dotnet add package`
+> below needs `--prerelease`. A preview because nothing outside this repository has used the surface
+> yet, and the public API baseline is the part most likely to still move. All five packages are built
+> and tested: **480 tests** needing nothing installed, on both target frameworks, plus **202
+> integration tests** against **PostgreSQL 16, SQL Server 2022 and MongoDB 7** in containers. See
+> [testing.md](docs/testing.md), which also lists what is not covered yet.
 
 ---
 
@@ -58,13 +59,12 @@ Nothing else to install.
 dotnet new web -n MyApp
 cd MyApp
 dotnet add package Microsoft.EntityFrameworkCore.Sqlite
-dotnet add reference ../dotnetboost-auditing/src/DotNetBoost.Auditing.Core
-dotnet add reference ../dotnetboost-auditing/src/DotNetBoost.Auditing.EntityFrameworkCore
-dotnet add reference ../dotnetboost-auditing/src/DotNetBoost.Auditing.API
+dotnet add package DotNetBoost.Auditing.Core --prerelease
+dotnet add package DotNetBoost.Auditing.EntityFrameworkCore --prerelease
+dotnet add package DotNetBoost.Auditing.API --prerelease
 ```
 
-Once the packages are published those three lines become `dotnet add package
-DotNetBoost.Auditing.Core`, and so on.
+`--prerelease` is needed while the only published version is a preview; it drops away at 1.0.0.
 
 **2. Replace `Program.cs` with this**
 

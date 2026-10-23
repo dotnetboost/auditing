@@ -3,11 +3,13 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-preview.1] — 2026-10-23
 
-The first work on the library. All five packages are built and tested: 480 tests on net8.0 and
-net10.0 needing nothing installed, plus 202 integration tests against PostgreSQL, SQL Server and
-MongoDB in containers.
+The first published build, and a preview rather than a release: nothing outside this repository has
+used the surface yet, and the public API baseline in `PublicApi.txt` is the part most likely to
+still move. Installing it needs `--prerelease` until there is a stable version. All five packages
+are built and tested: 480 tests on net8.0 and net10.0 needing nothing installed, plus 202
+integration tests against PostgreSQL, SQL Server and MongoDB in containers.
 
 ### Added
 - **`DotNetBoost.Auditing.Core`** — the engine and its contracts.
