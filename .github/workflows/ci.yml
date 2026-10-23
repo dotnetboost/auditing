@@ -127,6 +127,44 @@ jobs:
           path: ./test-results
           retention-days: 7
 
+  # ───────────────────────────────────────────────────────────────────────
+  # The dashboard has no tests (see docs/testing.md, "Still not covered"), so the linter and the
+  # type-checker are the only things standing between a broken client and a green build. They at
+  # least fail on a component that does not compile or a composable that reads a field the API
+  # contract does not have.
+  #
+  # Deliberately not in pack's `needs`: nothing in clients/ ships inside the NuGet packages, so a
+  # lint error here should not be able to block a release. A red job still fails the workflow.
+  dashboard:
+    name: Dashboard (lint & typecheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: clients/dashboard
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: clients/dashboard/package-lock.json
+
+      # `npm ci` honours the committed lock file, and its postinstall runs `nuxt prepare`, which
+      # generates the .nuxt types that typecheck needs. Without that step vue-tsc fails on Nuxt's
+      # own auto-imports rather than on anything in this repository.
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
   pack:
     name: Pack
     runs-on: ubuntu-latest

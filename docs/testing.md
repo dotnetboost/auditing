@@ -16,7 +16,7 @@ The layout is the one `DotNetBoost.Settings`, `.Media` and `.MultiLingual` use �
 | `ScaleTests` | 4 | net10.0 | **Docker, and opt-in.** Measurements on a million-entry trail. Skipped unless asked for, never run by CI |
 
 ```bash
-dotnet test                                                   # everything — 556 tests
+dotnet test                                                   # everything — 686 tests
 dotnet test tests/DotNetBoost.Auditing.IntegrationTests       # containers only
 dotnet test --filter "FullyQualifiedName!~SqlServer"          # skip the slow fixture
 ```
@@ -196,7 +196,8 @@ dotnet test --filter "FullyQualifiedName!~SqlServer"
 
 - **MySQL / MariaDB.** Neither store claims to support them; the Dapper store would need a fourth
   dialect.
-- **Concurrency.** Nothing yet writes from several connections at once, so the stores' behaviour
-  under contention is untested rather than known.
-- **Scale.** The prune is batched and the indexes are chosen for the reads the library issues, but
-  no test has put a million entries in a table to find out whether that was the right guess.
+- **The dashboard.** `clients/dashboard` has no tests — 2,162 lines of Vue and TypeScript, among
+  them the two composables that do the fetching and the paging, the request builder, and the proxy
+  that forwards to the audit endpoints. CI lints and type-checks it, so it is known to compile and
+  to satisfy ESLint, and nothing beyond that is known. Nothing checks that a filter sends the query
+  it displays, or that the table pages the way the cursor underneath it does.
