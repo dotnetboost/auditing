@@ -24,6 +24,13 @@ No Aspire CLI is required: `AspireUseCliBundle` resolves the orchestrator and da
 
 Each API has a health check, and the dashboard waits for the one it is pointed at.
 
+The shared defaults subscribe to the library's own meter, so the Aspire dashboard's **Metrics** tab
+shows `dotnetboost.auditing.entries.recorded`, `.writes.suppressed` and `.entries.deleted` for
+whichever API you select, with no wiring in the samples. Create or change a product and the recorded
+counter moves; `GET /api/products/{id}` bumps an `[AuditIgnore]` view count, so reading one moves
+the **suppressed** counter instead, tagged `audit.reason=NothingChanged`. Those two side by side are
+the quickest way to see what [observability.md](observability.md) is for.
+
 ## One database, deliberately
 
 Each sample's trail lives in the same database as that sample's own data, and that is the design

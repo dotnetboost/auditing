@@ -2,6 +2,7 @@ using Dapper;
 using DotNetBoost.Auditing.API;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Models;
+using DotNetBoost.Auditing.Core.Services;
 using Npgsql;
 using SampleApp;
 using SampleApp.Dapper.Data;
@@ -78,6 +79,12 @@ builder.Services.AddAuditing(options =>
     // It is also what GET /api/audit/entities answers with, so the dashboard's model page is empty
     // without it.
     .DeclareEntitiesFrom(typeof(Product).Assembly)
+    // Logs what the engine decided NOT to record, which is otherwise invisible: a null return is
+    // the only signal, and the interceptor has no caller to hand it to. Warnings for the two cases
+    // that are usually a misconfiguration, Debug for the rest. The three counters need no line
+    // here — they are on the meter named by AuditingTelemetry.MeterName, which the Aspire defaults
+    // subscribe to, so they appear in the dashboard while this app runs.
+    .UseLoggingObserver()
     .Build();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,7 +185,7 @@ products.MapGet("/", async (
 products.MapGet("/{id:int}", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     CancellationToken ct) =>
 {
@@ -214,7 +221,7 @@ products.MapGet("/{id:int}", async (
 products.MapPost("/", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     CreateProduct body,
     CancellationToken ct) =>
 {
@@ -239,15 +246,10 @@ products.MapPost("/", async (
     product.Id = await connection.ExecuteScalarAsync<int>(
         new CommandDefinition(sql, product, unitOfWork.Current, cancellationToken: ct));
 
-    // The initial values, as NewValue. For(product) carries the type, so SupplierCost is recorded
-    // as changed with its values withheld.
-    await audit.For(product).CreatedAsync(
-    [
-        new AuditChange(nameof(Product.Name), null, product.Name),
-        new AuditChange(nameof(Product.Price), null, product.Price),
-        new AuditChange(nameof(Product.Category), null, product.Category),
-        new AuditChange(nameof(Product.SupplierCost), null, product.SupplierCost)
-    ], ct: ct);
+    // The initial values, as NewValue — read off the entity rather than listed, so a new property
+    // is in the trail the day it is added to Product. For(product) carries the type, so SupplierCost
+    // is recorded as changed with its values withheld.
+    await audit.For(product).CreatedAsync(AuditDiff.InitialValues(product), ct: ct);
 
     return Results.Created($"/api/products/{product.Id}", ToResponse(product));
 })
@@ -256,7 +258,7 @@ products.MapPost("/", async (
 products.MapPut("/{id:int}", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     UpdateProduct body,
     CancellationToken ct) =>
@@ -283,22 +285,18 @@ products.MapPut("/{id:int}", async (
     };
 
     // Only the properties that actually moved, which the change tracker works out for the EF Core
-    // sample. The engine would record nothing for an Updated write whose list came out empty, but
-    // the comparison itself belongs where the two values are.
-    var changes = new List<AuditChange>(capacity: 4);
+    // sample and AuditDiff works out from the type here. Written out as four `if`s it worked just as
+    // well until someone added a fifth property to Product and the trail quietly stopped mentioning
+    // it — which is the failure this call is here to remove.
+    //
+    // It compares the properties the engine reasons about: not Id, which is already the entry's
+    // address, and not the [AuditIgnore] view count, so a request that moved nothing else comes back
+    // empty rather than as an entry that says a change happened and never which. SupplierCost IS
+    // compared — [AuditRedact] withholds the values from the table, not from the comparison.
+    var changes = AuditDiff.Between(before, after);
 
-    if (after.Name != before.Name)
-        changes.Add(new AuditChange(nameof(Product.Name), before.Name, after.Name));
-
-    if (after.Price != before.Price)
-        changes.Add(new AuditChange(nameof(Product.Price), before.Price, after.Price));
-
-    if (after.Category != before.Category)
-        changes.Add(new AuditChange(nameof(Product.Category), before.Category, after.Category));
-
-    if (after.SupplierCost != before.SupplierCost)
-        changes.Add(new AuditChange(nameof(Product.SupplierCost), before.SupplierCost, after.SupplierCost));
-
+    // The engine would refuse an Updated write of nothing anyway; returning here also saves the
+    // UPDATE and the round trip.
     if (changes.Count == 0)
         return Results.Ok(ToResponse(before));
 
@@ -321,7 +319,7 @@ products.MapPut("/{id:int}", async (
 products.MapDelete("/{id:int}", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     CancellationToken ct) =>
 {
@@ -336,15 +334,11 @@ products.MapDelete("/{id:int}", async (
         new CommandDefinition(sql, new { Id = id }, unitOfWork.Current, cancellationToken: ct));
 
     // The final values, as OldValue — and worth the trouble, because after the DELETE this entry is
-    // the only copy of what the row said. Nothing cascades to the trail: the audit tables carry no
-    // foreign key to Products, so the history survives the row by design rather than by luck.
-    await audit.For(product).DeletedAsync(
-    [
-        new AuditChange(nameof(Product.Name), product.Name, null),
-        new AuditChange(nameof(Product.Price), product.Price, null),
-        new AuditChange(nameof(Product.Category), product.Category, null),
-        new AuditChange(nameof(Product.SupplierCost), product.SupplierCost, null)
-    ], ct: ct);
+    // the only copy of what the row said, which is the one entry where listing the properties by
+    // hand and forgetting one cannot be repaired afterwards. Nothing cascades to the trail: the
+    // audit tables carry no foreign key to Products, so the history survives the row by design
+    // rather than by luck.
+    await audit.For(product).DeletedAsync(AuditDiff.FinalValues(product), ct: ct);
 
     return Results.NoContent();
 })
@@ -354,7 +348,7 @@ products.MapDelete("/{id:int}", async (
 products.MapGet("/{id:int}/history", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditReader reader,
+    IAuditManager audit,
     int id,
     // Nullable, with defaults applied below. A non-nullable int here would make both REQUIRED query
     // parameters — minimal APIs reads "not nullable" as "must be supplied" — and the endpoint would
@@ -368,10 +362,10 @@ products.MapGet("/{id:int}/history", async (
     // Addressed by hand when the row is gone: the trail outlives the entity, so a history endpoint
     // that needed the entity to exist could not show the deletion.
     //
-    // Zero means "the configured default page", which the reader applies — this endpoint does not
+    // Zero means "the configured default page", which the manager applies — this endpoint does not
     // get to invent a page size of its own.
     var page = product is null
-        ? await reader.QueryAsync(
+        ? await audit.QueryAsync(
             new AuditQuery
             {
                 EntityName = "Product",
@@ -379,7 +373,7 @@ products.MapGet("/{id:int}/history", async (
                 Skip       = skip ?? 0,
                 Take       = take ?? 0
             }, ct)
-        : await reader.HistoryAsync(product, skip ?? 0, take ?? 0, ct);
+        : await audit.HistoryAsync(product, skip ?? 0, take ?? 0, ct);
 
     // The API package's wire shape, not the store model: AuditAction comes out as a name, and the
     // response carries the page size actually served after the clamp.
@@ -390,7 +384,7 @@ products.MapGet("/{id:int}/history", async (
 products.MapPost("/discount", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     ApplyDiscount body,
     CancellationToken ct) =>
 {
@@ -455,7 +449,7 @@ products.MapPost("/discount", async (
 products.MapPost("/{id:int}/fail", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     int id,
     CancellationToken ct) =>
 {
@@ -497,7 +491,7 @@ products.MapPost("/{id:int}/fail", async (
 app.MapPost("/api/stock-checks", async (
     IDbConnection connection,
     UnitOfWork unitOfWork,
-    IAuditRecorder audit,
+    IAuditManager audit,
     RecordStockCheck body,
     CancellationToken ct) =>
 {
@@ -517,11 +511,10 @@ app.MapPost("/api/stock-checks", async (
     check.Id = await connection.ExecuteScalarAsync<int>(
         new CommandDefinition(sql, check, unitOfWork.Current, cancellationToken: ct));
 
-    await audit.For(check).CreatedAsync(
-    [
-        new AuditChange(nameof(StockCheck.ProductId), null, check.ProductId),
-        new AuditChange(nameof(StockCheck.OnHand), null, check.OnHand)
-    ], ct: ct);
+    // CheckedAt is in here too, which the hand-written list it replaced left out — the EF Core
+    // sample's interceptor has always recorded it, so the three samples now say the same thing about
+    // the same entity.
+    await audit.For(check).CreatedAsync(AuditDiff.InitialValues(check), ct: ct);
 
     return Results.NoContent();
 })
@@ -532,13 +525,13 @@ app.MapPost("/api/stock-checks", async (
 // Retention. The library never prunes on its own: there is no hosted service and no timer, because
 // the one irreversible thing it does should be something an application schedules.
 // ─────────────────────────────────────────────────────────────────────────────
-app.MapPost("/api/maintenance/prune", async (IAuditPruner pruner, int? batchSize, CancellationToken ct) =>
+app.MapPost("/api/maintenance/prune", async (IAuditManager audit, int? batchSize, CancellationToken ct) =>
 {
-    var deleted = await pruner.PruneAsync(batchSize is > 0 ? batchSize.Value : 1000, ct);
+    var deleted = await audit.PruneAsync(batchSize is > 0 ? batchSize.Value : 1000, ct);
 
     // Honours both retentions at once: StockCheck's thirty days and the configured year for
     // everything else — and it can only do that because StockCheck is DECLARED. An undeclared
-    // entity has no [AuditRetention] for the pruner to find, so the global sweep would take its
+    // entity has no [AuditRetention] for the prune to find, so the global sweep would take its
     // entries along with everything else's.
     return Results.Ok(new AffectedResponse(deleted));
 })

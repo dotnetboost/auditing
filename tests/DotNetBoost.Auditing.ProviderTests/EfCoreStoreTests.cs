@@ -3,6 +3,7 @@ using DotNetBoost.Auditing.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using DotNetBoost.Auditing.EntityFrameworkCore;
+using System.Globalization;
 
 namespace DotNetBoost.Auditing.ProviderTests;
 
@@ -32,7 +33,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 5);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { Take = 100 }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { Take = 100 }));
 
         Assert.Equal(3, page.Entries.Count);
         Assert.Null(page.Total);
@@ -53,7 +54,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 5);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery()));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery()));
 
         Assert.Equal(2, page.Entries.Count);
     }
@@ -65,7 +66,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 5);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { Take = 2, IncludeTotal = true }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { Take = 2, IncludeTotal = true }));
 
         Assert.Equal(2, page.Entries.Count);
         Assert.Equal(5, page.Total);
@@ -86,7 +87,7 @@ public class EfCoreStoreTests
         var page = await harness.InScopeAsync(async (db, sp) =>
         {
             var product = await db.Products.FirstAsync();
-            return await sp.GetRequiredService<IAuditReader>().HistoryAsync(product);
+            return await sp.GetRequiredService<IAuditManager>().HistoryAsync(product);
         });
 
         Assert.Equal(2, page.Entries.Count);
@@ -111,7 +112,7 @@ public class EfCoreStoreTests
 
         await harness.InScopeAsync(async (_, sp) =>
         {
-            var reader = sp.GetRequiredService<IAuditReader>();
+            var reader = sp.GetRequiredService<IAuditManager>();
 
             Assert.Equal(2, (await reader.QueryAsync(new AuditQuery { Actor = "alice" })).Entries.Count);
             Assert.Single((await reader.QueryAsync(new AuditQuery { ActorMissing = true })).Entries);
@@ -130,7 +131,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 1);
 
         var page = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { IncludeChanges = false }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { IncludeChanges = false }));
 
         Assert.Empty(Assert.Single(page.Entries).Changes);
     }
@@ -144,12 +145,12 @@ public class EfCoreStoreTests
         var id = Assert.Single(await harness.EntriesAsync()).Id;
 
         var entry = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(id));
+            sp.GetRequiredService<IAuditManager>().GetAsync(id));
 
         Assert.NotNull(entry);
         Assert.NotEmpty(entry.Changes);
         Assert.Null(await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(Guid.NewGuid())));
+            sp.GetRequiredService<IAuditManager>().GetAsync(Guid.NewGuid())));
     }
 
     [Fact]
@@ -165,7 +166,7 @@ public class EfCoreStoreTests
                 s.SetProperty(e => e.OccurredAt, DateTime.UtcNow.AddDays(-90))));
 
         var deleted = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditPruner>().PruneAsync(batchSize: 2));
+            sp.GetRequiredService<IAuditManager>().PruneAsync(batchSize: 2));
 
         Assert.Equal(3, deleted);
         Assert.Empty(await harness.EntriesAsync());
@@ -183,7 +184,7 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 2);
 
         Assert.Equal(0, await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditPruner>().PruneAsync()));
+            sp.GetRequiredService<IAuditManager>().PruneAsync()));
 
         Assert.Equal(2, (await harness.EntriesAsync()).Count);
     }
@@ -197,7 +198,7 @@ public class EfCoreStoreTests
         var erased = await harness.InScopeAsync(async (db, sp) =>
         {
             var product = await db.Products.FirstAsync();
-            return await sp.GetRequiredService<IAuditPruner>().EraseForAsync(product);
+            return await sp.GetRequiredService<IAuditManager>().EraseForAsync(product);
         });
 
         Assert.Equal(1, erased);
@@ -223,10 +224,49 @@ public class EfCoreStoreTests
         await SeedAsync(harness, 1);
 
         var erased = await harness.InScopeAsync((_, sp) =>
-            sp.GetRequiredService<IAuditPruner>().EraseForActorAsync("alice"));
+            sp.GetRequiredService<IAuditManager>().EraseForActorAsync("alice"));
 
         Assert.Equal(2, erased);
         Assert.Equal("bob", Assert.Single(await harness.EntriesAsync()).Actor);
+    }
+
+    [Fact]
+    public async Task Erasing_a_trail_past_the_parameter_ceiling_removes_all_of_it()
+    {
+        // SQLite's ceiling is 32,766 bound variables and SQL Server's is 2,100, and the ids of an
+        // erasure reach the DELETE through Contains, which some providers translate to one
+        // parameter per id. Unbatched, this threw rather than ran slowly — on the path a
+        // subject-access deletion request takes. The conformance suite covers the looping at a
+        // size every engine shares; this is the size that proves the ceiling, here rather than in
+        // the container suite so it guards without Docker.
+        using var harness = new EfCoreHarness();
+
+        const int count = 40_000;
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            for (var i = 0; i < count; i++)
+            {
+                db.Set<AuditEntry>().Add(new AuditEntry
+                {
+                    Id            = Guid.NewGuid(),
+                    EntityName    = "Product",
+                    EntityId      = i.ToString(CultureInfo.InvariantCulture),
+                    Action        = AuditAction.Created,
+                    Actor         = "alice",
+                    CorrelationId = "bulk",
+                    OccurredAt    = DateTime.UtcNow
+                });
+            }
+
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Equal(count, await harness.InScopeAsync((_, sp) =>
+            sp.GetRequiredService<IAuditManager>().EraseForActorAsync("alice")));
+
+        await harness.InScopeAsync(async (db, _) =>
+            Assert.Equal(0, await db.Set<AuditEntry>().CountAsync()));
     }
 
     [Fact]

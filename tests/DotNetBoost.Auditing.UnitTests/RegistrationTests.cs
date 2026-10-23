@@ -2,6 +2,8 @@ using DotNetBoost.Auditing.Core;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Models;
+using DotNetBoost.Auditing.Core.Services;
+using DotNetBoost.Auditing.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DotNetBoost.Auditing.UnitTests;
@@ -37,9 +39,9 @@ public class RegistrationTests
 
         using var scope = provider.CreateScope();
 
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditRecorder>());
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditReader>());
-        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditPruner>());
+        // One interface now, so this is one assertion rather than three — and the engines
+        // behind it must resolve too, or the manager could not have been constructed.
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAuditManager>());
     }
 
     [Fact]
@@ -55,6 +57,44 @@ public class RegistrationTests
     }
 
     [Fact]
+    public void The_default_observer_is_the_one_that_does_nothing()
+    {
+        var provider = new ServiceCollection()
+            .AddAuditing()
+            .UseCustomStore<RecordingAuditStore>()
+            .Build()
+            .BuildServiceProvider();
+
+        // Registered rather than absent, so the engine has one call site per decision instead of a
+        // null check at each — and so turning observation on is a registration, not a code change.
+        Assert.IsType<NullAuditObserver>(provider.GetRequiredService<IAuditObserver>());
+    }
+
+    [Fact]
+    public async Task A_registered_observer_is_told_what_was_not_recorded()
+    {
+        var observer = new RecordingAuditObserver();
+
+        var provider = new ServiceCollection()
+            .AddAuditing(o => o.Enabled = false)
+            .UseCustomStore<RecordingAuditStore>()
+            .UseObserver<RecordingAuditObserver>()
+            .Build()
+            .BuildServiceProvider();
+
+        // Singleton, so the instance the engine was given is the one a caller can read afterwards.
+        observer = (RecordingAuditObserver)provider.GetRequiredService<IAuditObserver>();
+
+        using var scope = provider.CreateScope();
+
+        Assert.Null(await scope.ServiceProvider.GetRequiredService<IAuditManager>()
+            .For(new Product { Id = 1 })
+            .UpdatedAsync([new AuditChange(nameof(Product.Price), 1m, 2m)]));
+
+        Assert.Equal(AuditSuppression.RecordingDisabled, Assert.Single(observer.Suppressed).Reason);
+    }
+
+    [Fact]
     public async Task An_end_to_end_registration_records_through_the_resolved_services()
     {
         var store = new RecordingAuditStore();
@@ -67,7 +107,7 @@ public class RegistrationTests
             .BuildServiceProvider();
 
         using var scope = provider.CreateScope();
-        var recorder = scope.ServiceProvider.GetRequiredService<IAuditRecorder>();
+        var recorder = scope.ServiceProvider.GetRequiredService<IAuditManager>();
 
         await recorder.For("Person", "42").UpdatedAsync(
         [

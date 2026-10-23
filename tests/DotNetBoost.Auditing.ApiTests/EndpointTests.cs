@@ -271,6 +271,66 @@ public class EndpointTests
     }
 
     [Fact]
+    public async Task A_trail_can_be_walked_with_the_cursor_each_page_returns()
+    {
+        await using var api = await ApiHarness.StartAsync();
+
+        for (var i = 1; i <= 5; i++)
+            await api.CreateProductAsync($"Product {i}");
+
+        var seen   = new List<Guid>();
+        string? after = null;
+
+        for (var request = 0; request < 10; request++)
+        {
+            var url  = after is null ? "/api/audit?take=2" : $"/api/audit?take=2&after={Uri.EscapeDataString(after)}";
+            var page = await PageAsync(await api.GetAsync(url));
+
+            if (page.Entries.Count == 0)
+            {
+                // The walk ends with an empty page, and that page has no cursor to follow.
+                Assert.Null(page.NextCursor);
+                break;
+            }
+
+            seen.AddRange(page.Entries.Select(e => e.Id));
+            Assert.NotNull(page.NextCursor);
+            after = page.NextCursor;
+        }
+
+        // Every entry once: five creations, no row seen twice and none missed at a page boundary.
+        Assert.Equal(5, seen.Count);
+        Assert.Equal(5, seen.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task A_cursor_the_api_did_not_issue_is_the_clients_mistake()
+    {
+        await using var api = await ApiHarness.StartAsync();
+        await api.CreateProductAsync();
+
+        var response = await api.GetAsync("/api/audit?after=not-a-cursor");
+
+        // 400 rather than silently serving the newest page: a client paging a long trail would
+        // otherwise loop over page one for ever with nothing to explain why.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Asking_for_a_cursor_and_an_offset_at_once_is_refused()
+    {
+        await using var api = await ApiHarness.StartAsync();
+        await api.CreateProductAsync();
+
+        var first  = await PageAsync(await api.GetAsync("/api/audit?take=1"));
+        var both   = await api.GetAsync($"/api/audit?skip=1&after={Uri.EscapeDataString(first.NextCursor!)}");
+
+        // Two answers to where the page starts. Either could be the one the client meant, so
+        // neither is guessed at.
+        Assert.Equal(HttpStatusCode.BadRequest, both.StatusCode);
+    }
+
+    [Fact]
     public async Task The_destructive_endpoints_are_not_mapped_by_default()
     {
         await using var api = await ApiHarness.StartAsync();
@@ -279,7 +339,7 @@ public class EndpointTests
         // Not merely secured — absent. An HTTP verb that deletes a trail is not something to
         // publish because a library happened to offer it.
         var entity = await api.DeleteAsync("/api/audit/entity/Product/1");
-        var actor  = await api.DeleteAsync("/api/audit/actor/alice");
+        var actor  = await api.DeleteAsync("/api/audit/actor?actor=alice");
         var prune  = await api.PostAsync("/api/audit/prune");
 
         // 404 or 405 depending on the path shape — ASP.NET answers 405 where a path has only a GET.
@@ -329,11 +389,51 @@ public class EndpointTests
         await api.CreateProductAsync("First", asUser: "alice");
         await api.CreateProductAsync("Second", asUser: "bob");
 
-        var response = await api.DeleteAsync("/api/audit/actor/alice");
+        var response = await api.DeleteAsync("/api/audit/actor?actor=alice");
         Assert.Equal(1, (await response.Content.ReadFromJsonAsync<DeletionResponse>(Json))!.Deleted);
 
         var page = await PageAsync(await api.GetAsync("/api/audit"));
         Assert.Equal("bob", Assert.Single(page.Entries).Actor);
+    }
+
+    [Fact]
+    public async Task An_actor_whose_name_is_not_a_path_segment_can_still_be_erased()
+    {
+        await using var api = await ApiHarness.StartAsync(o => o.MapErasure = true);
+
+        // A subject claim that is a URI, which is what several identity providers issue. In the
+        // path this was unreachable: the slashes made it a different route, and a catch-all would
+        // have matched a typo just as happily.
+        const string actor = "https://sts.example.com/users/42";
+
+        await api.CreateProductAsync("First", asUser: actor);
+        await api.CreateProductAsync("Second", asUser: "bob");
+
+        var response = await api.DeleteAsync($"/api/audit/actor?actor={Uri.EscapeDataString(actor)}");
+        response.EnsureSuccessStatusCode();
+
+        Assert.Equal(1, (await response.Content.ReadFromJsonAsync<DeletionResponse>(Json))!.Deleted);
+
+        var page = await PageAsync(await api.GetAsync("/api/audit"));
+        Assert.Equal("bob", Assert.Single(page.Entries).Actor);
+    }
+
+    [Fact]
+    public async Task Erasing_with_no_actor_is_the_clients_mistake_and_erases_nothing()
+    {
+        await using var api = await ApiHarness.StartAsync(o => o.MapErasure = true);
+        await api.CreateProductAsync("First", asUser: "alice");
+
+        foreach (var query in new[] { "", "?actor=", "?actor=%20" })
+        {
+            var response = await api.DeleteAsync("/api/audit/actor" + query);
+
+            // 400 rather than "erased everything with no actor", which is what an unguarded
+            // parameter on an irreversible endpoint would have meant.
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        Assert.Single((await PageAsync(await api.GetAsync("/api/audit"))).Entries);
     }
 
     [Fact]

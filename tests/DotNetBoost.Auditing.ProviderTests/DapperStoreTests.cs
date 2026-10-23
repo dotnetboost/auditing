@@ -14,7 +14,7 @@ public class DapperStoreTests
         string entityId = "42",
         AuditAction action = AuditAction.Updated,
         params AuditChange[] changes) =>
-        harness.InScopeAsync(sp => sp.GetRequiredService<IAuditRecorder>()
+        harness.InScopeAsync(sp => sp.GetRequiredService<IAuditManager>()
             .For("Product", entityId)
             .RecordAsync(action, changes));
 
@@ -62,7 +62,7 @@ public class DapperStoreTests
         Assert.NotNull(written);
 
         var read = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(written.Id));
+            sp.GetRequiredService<IAuditManager>().GetAsync(written.Id));
 
         Assert.NotNull(read);
         Assert.Equal("Product", read.EntityName);
@@ -85,7 +85,7 @@ public class DapperStoreTests
         var written = await RecordAsync(harness, changes: new AuditChange("Price", 1m, 2m));
 
         var read = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(written!.Id));
+            sp.GetRequiredService<IAuditManager>().GetAsync(written!.Id));
 
         // SQLite returns Kind.Unspecified. Left alone it serializes without a "Z" and every client
         // reads it as local time — and the two stores would then disagree about when a change
@@ -198,7 +198,7 @@ public class DapperStoreTests
             await RecordAsync(harness, entityId: i.ToString(System.Globalization.CultureInfo.InvariantCulture), changes: new AuditChange("Price", i, i + 1));
 
         var page = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { Take = 10_000 }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { Take = 10_000 }));
 
         Assert.Equal(2, page.Entries.Count);
         Assert.True(page.Entries[0].OccurredAt >= page.Entries[^1].OccurredAt);
@@ -233,10 +233,10 @@ public class DapperStoreTests
         });
 
         var first = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { Take = 3 }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { Take = 3 }));
 
         var second = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { Skip = 3, Take = 3 }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { Skip = 3, Take = 3 }));
 
         var ids = first.Entries.Concat(second.Entries).Select(e => e.Id).ToList();
         Assert.Equal(6, ids.Distinct().Count());
@@ -255,7 +255,7 @@ public class DapperStoreTests
 
         await harness.InScopeAsync(async sp =>
         {
-            var reader = sp.GetRequiredService<IAuditReader>();
+            var reader = sp.GetRequiredService<IAuditManager>();
 
             Assert.Single((await reader.QueryAsync(new AuditQuery { Actor = "alice" })).Entries);
             Assert.Single((await reader.QueryAsync(new AuditQuery { ActorMissing = true })).Entries);
@@ -276,7 +276,7 @@ public class DapperStoreTests
 
         await harness.InScopeAsync(async sp =>
         {
-            var reader = sp.GetRequiredService<IAuditReader>();
+            var reader = sp.GetRequiredService<IAuditManager>();
 
             Assert.Null((await reader.QueryAsync(new AuditQuery { Take = 2 })).Total);
             Assert.Equal(3, (await reader.QueryAsync(new AuditQuery { Take = 2, IncludeTotal = true })).Total);
@@ -290,7 +290,7 @@ public class DapperStoreTests
         await RecordAsync(harness, changes: new AuditChange("Price", 1m, 2m));
 
         var page = await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().QueryAsync(new AuditQuery { IncludeChanges = false }));
+            sp.GetRequiredService<IAuditManager>().QueryAsync(new AuditQuery { IncludeChanges = false }));
 
         Assert.Empty(Assert.Single(page.Entries).Changes);
     }
@@ -301,6 +301,6 @@ public class DapperStoreTests
         using var harness = new DapperHarness();
 
         Assert.Null(await harness.InScopeAsync(sp =>
-            sp.GetRequiredService<IAuditReader>().GetAsync(Guid.NewGuid())));
+            sp.GetRequiredService<IAuditManager>().GetAsync(Guid.NewGuid())));
     }
 }

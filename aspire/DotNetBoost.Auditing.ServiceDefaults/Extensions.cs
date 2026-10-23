@@ -57,7 +57,14 @@ public static class Extensions
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
-                .AddRuntimeInstrumentation())
+                .AddRuntimeInstrumentation()
+                // The library's own three counters: entries recorded, writes suppressed, entries
+                // deleted. Named as a literal rather than through AuditingTelemetry.MeterName
+                // because this project references none of the packages on purpose — it is the
+                // shared Aspire defaults, not a consumer. The constant is the one to trust; if the
+                // two ever disagree, the Aspire dashboard goes quiet and nothing else notices,
+                // which is why the name is pinned by a test in UnitTests.
+                .AddMeter("DotNetBoost.Auditing"))
             .WithTracing(tracing => tracing
                 .AddSource(builder.Environment.ApplicationName)
                 .AddAspNetCoreInstrumentation(tracing =>

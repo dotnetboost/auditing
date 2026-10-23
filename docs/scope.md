@@ -1,7 +1,7 @@
 # Scope — DotNetBoost.Auditing
 
-> **Status:** all five packages are built and tested against this document — 238 unit tests on
-> net8.0 and net10.0, plus 168 integration tests against PostgreSQL, SQL Server and MongoDB in
+> **Status:** all five packages are built and tested against this document — 480 unit tests on
+> net8.0 and net10.0, plus 202 integration tests against PostgreSQL, SQL Server and MongoDB in
 > containers. Every store is proven against its real engine; [testing.md](testing.md) says what
 > each suite covers and what is still not covered. Written 2026-10-16 before any code existed, so the boundaries were chosen
 > rather than discovered — where building changed one, the section says so. §13 lists those; what
@@ -212,7 +212,7 @@ What building it established, beyond what this section assumed:
   non-relational provider. Both still record. See [limitations.md](limitations.md).
 
 **b. The explicit recorder — `DotNetBoost.Auditing.Core`. Built, with the Dapper store behind it.**
-`IAuditRecorder` / `audit.For(entity).RecordAsync(…)`, for Dapper users and for anything the change
+`IAuditManager` / `audit.For(entity).RecordAsync(…)`, for Dapper users and for anything the change
 tracker cannot see (a raw `ExecuteUpdate`, a stored procedure, a domain event). No transaction
 guarantee unless the caller supplies the transaction, which `WithTransaction(tx)` accepts the way
 Media's store does.
@@ -245,11 +245,11 @@ Every read is **bounded**. Settings' `GetHistoryAsync` was unbounded over a tabl
 with no paging on the endpoint, and that is on the list of why it was deleted.
 
 ```csharp
-IAuditReader.QueryAsync(new AuditQuery
+IAuditManager.QueryAsync(new AuditQuery
 {
     EntityName = "Product", EntityId = "42",
     Actor = null, Action = null, From = null, To = null,
-    Skip = 0, Take = 50          // Take is clamped to AuditOptions.MaxPageSize
+    Skip = 0, Take = 50          // Take is clamped to AuditOptions.MaxPageSize; After walks instead
 });
 ```
 
@@ -275,7 +275,7 @@ every change and offers no way to stop is a library that fills a disk, so prunin
 later nicety:
 
 - `AuditOptions.Retention` — a `TimeSpan?`, `null` meaning keep everything, which stays the default.
-- `IAuditPruner.PruneAsync(olderThan, ct)` — batched deletes, resumable, safe to run concurrently
+- `IAuditManager.PruneAsync(olderThan, ct)` — batched deletes, resumable, safe to run concurrently
   with writes. Per-entity overrides (`[AuditRetention(Days = 90)]`), because an order's trail and a
   user-preference's trail are not kept for the same length of time.
 - **`AuditPruneScope`**, which the build added because the design above does not work without it: an
@@ -286,60 +286,59 @@ later nicety:
 - No hosted background service in `.Core`. An opt-in one in `.API` or the Aspire sample, so the
   library never starts a timer in a process that did not ask for it.
 
-## 10. Three services, not one manager
+## 10. One manager, and what it cost
 
-Recording, reading and pruning are three interfaces, not three method groups on one:
+Recording, reading and retention are one interface, `IAuditManager`, as `ISettingManager`,
+`IMediaManager` and `IMultiLingualManager` are in the sibling libraries. One service to inject, one
+place to look, `audit.For(x)` the same idiom as `media.For(x)`:
 
-| | |
-|---|---|
-| `IAuditRecorder` | writes. `For(entity)`, `For(name, id)`, `RecordAsync`, `IsAudited` |
-| `IAuditReader` | reads. Every read clamped to a page (§8) |
-| `IAuditPruner` | deletes. Retention and erasure, and the only thing that deletes (§9) |
+```csharp
+await audit.For(product).UpdatedAsync([new AuditChange(nameof(Product.Price), 24.99m, 19.99m)], ct);
+var page  = await audit.HistoryAsync(product, ct: ct);
+var gone  = await audit.PruneAsync(ct: ct);
+```
 
-**The other three libraries in the suite do the opposite, and are right to.**
-`ISettingManager` is "entry-point for reading and writing"; `IMediaManager` is "the one service
-application code injects"; `IMultiLingualManager` covers translations and hangs language
-administration off a `Languages` accessor. One façade per library, because in those libraries the
-same admin screen that reads also writes, and splitting would be ceremony.
+The engine is still three classes — `AuditRecorder` holds the rules, `AuditReader` the clamp,
+`AuditPruner` the cutoffs — because they take different dependencies and have nothing to say to
+each other. They are internal, and `AuditManager` forwards to them without logic of its own, so
+there is exactly one implementation of redaction and one of the page clamp.
 
-**What makes this library different is that it is the only one with an adversary.** For settings,
-media and translations the threat model is a developer making a mistake. Nobody tampers with a
+**What this cost, and it is not nothing.** The alternative was three interfaces, one per verb, and
+auditing is the one library in this suite where that would have earned its keep. For settings,
+media and translations the threat model is a developer making a mistake; nobody tampers with a
 translation to cover their tracks. Audit data is the only data in the suite that someone has a
 motive to forge or destroy, and that motive belongs to the people the data is about.
 
-That decision was already taken one layer down: `IAuditStore` has no update verb and never will
-(§3), nothing prunes on a timer (§9), and the entry's id and timestamp are the engine's —
-`AuditWrite` has no field for either, so no caller backdates a row. The split at the caller's edge
-is the next instance of the same commitment, not a lone quirk, and the reading audience (support,
-compliance, a history tab) is exactly the population that must not write.
+With one interface, **"this class displays history and cannot alter it" is no longer something a
+constructor can say.** A page that renders a trail is handed the same service that erases one. That
+guarantee was never enforcement — a developer with commit access could always have injected the
+pruner — but it was legibility: "which code can write to the audit trail?" was answerable by
+reading constructors, and widening that privilege showed up in a diff as a signature change rather
+than as one line inside a method. Now it is a convention, held up by review.
 
-**The actor is the deliberate exception, and it sharpens the point rather than weakening it.**
-`AuditWrite.Actor` overrides the ambient accessor, because a background job acting for a user and
-an import naming its source both need it. So recording access carries the ability to *misattribute*
-a change, not merely to record one — a caller that reaches `RecordAsync` can name anyone. The
-fluent path cannot: `For(x).UpdatedAsync(…)` never populates it. Keeping `RecordAsync` on an
-interface of its own is what makes "who here can do that?" answerable at a glance.
+What keeps standing, and carries more weight for it:
+- `IAuditStore` has no update verb and never will (§3). An entry that can be edited is not an
+  entry, whatever the service surface looks like.
+- The entry's id and timestamp are the engine's. `AuditWrite` has no field for either, so no
+  caller backdates a row.
+- Nothing prunes on a timer (§9). Deletion is always something an application scheduled.
 
-It matches how the code actually comes out. Across Core, `.API` and all three samples there are
-nineteen injection sites of these interfaces and **not one takes two of them**: recording happens in
-write paths, reading in query paths, pruning in a job that runs nightly and touches nothing else.
-An aggregate over three things never used together would have no cohesion to offer.
+**What does not stand, and is worth naming here rather than leaving to be found:** the actor is
+*not* the engine's last word. `AuditWrite.Actor` overrides the ambient accessor — deliberately, for
+a background job acting for a user or an import naming its source — so any code that can record can
+also name someone else as the one who acted. The fluent path cannot: `For(x).UpdatedAsync(…)` never
+sets it. But `RecordAsync` can, and on this branch every class holding `IAuditManager` has
+`RecordAsync`.
 
-**What this costs.** Discoverability. Someone arriving from `DotNetBoost.Media` will type
-`IAuditManager`, find nothing, and have to learn three names instead of one. That is a real tax and
-it is paid by every new reader; the mitigation is `<seealso>` on all three interfaces and this
-section, not a fourth type.
-
-**What it does not buy: enforcement.** A developer with commit access can inject `IAuditPruner` and
-delete the trail. The split stops accidents, not insiders. What it buys is legibility — "which code
-can write to the audit trail?" is answerable by reading constructors, and granting that privilege
-shows up in a diff as a signature change rather than one line inside a method. In a library about
-compliance that is a question someone eventually asks.
+**What was bought.** One name to learn instead of three, symmetry with the rest of the suite, and
+the end of the question that prompted this section — a developer arriving from `DotNetBoost.Media`
+now finds what they went looking for. For a suite whose consumers meet all four libraries, that is
+worth more than it would be for a package shipped alone.
 
 ## 11. Packages
 
 ```
-DotNetBoost.Auditing.Core                  attributes · IAuditRecorder · IAuditReader · IAuditPruner
+DotNetBoost.Auditing.Core                  attributes · IAuditManager · AuditSubject
                                            IAuditActorAccessor · IAuditStore · options · DI
 DotNetBoost.Auditing.EntityFrameworkCore   the SaveChanges interceptor + the EF store
 DotNetBoost.Auditing.Dapper                store only; recording is explicit
@@ -390,6 +389,20 @@ Repository: `~/dev/dotnetboost-auditing`, `github.com/dotnetboost/auditing`.
   `Microsoft.Extensions.DependencyInjection.Abstractions`: options are validated at `Build()`
   instead of through a hosted service, and the engine has nothing to say at runtime that is not
   either a thrown exception or a recorded entry.
+- **`AuditDiff`, and it was the samples that argued for it.** §7b said the explicit path reports its
+  own change list, which is true and is not the same thing as writing one out. Both non-EF samples
+  grew the identical four-property `if` chain, in two files, and a chain like that is correct the day
+  it is written and silently incomplete the day a property is added to the entity: nothing fails, the
+  trail simply stops mentioning that property. `AuditDiff.Between` / `InitialValues` / `FinalValues`
+  take the property list off the type instead. It is a convenience over the model rather than a
+  second set of rules — it skips the key (already the address), skips `[AuditIgnore]` so that an
+  update of only ignored properties comes back empty, compares `[AuditRedact]` and leaves the
+  withholding to the engine, and skips anything that is not a simple value. That last one is the
+  honest cost: a navigation property, a collection or a nested object is skipped **silently**,
+  because comparing them by reference would report a change on every write, so an entity whose
+  interesting state lives in a nested object still reports it by hand. Key discovery moved into one
+  internal place both this and `ConventionEntityKeyAccessor` read — the diff has to leave out exactly
+  the property the addressing uses, and two copies of that rule would eventually be two rules.
 - **Truncate the correlation id, refuse the actor.** Both are bounded columns, and the two deserve
   opposite answers. An over-long actor is a misconfigured accessor and half an identity is a
   different identity, so it throws. A correlation id is a diagnostic aid, and failing a business

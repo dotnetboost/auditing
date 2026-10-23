@@ -45,6 +45,15 @@ internal static class AuditValues
         // Cut to the limit INCLUDING the marker, so a store sizing a column at MaxValueLength
         // cannot be handed a longer string than it was told to expect.
         var keep = Math.Max(0, maxLength - TruncationSuffix.Length);
+
+        // Never between the halves of a surrogate pair. One half on its own is not a character —
+        // it is invalid UTF-16, and a database storing UTF-8 either replaces it with U+FFFD or
+        // refuses the row, so an emoji landing on the boundary could cost the whole entry. Dropping
+        // the pair makes the value one character shorter than the limit, which is the right way to
+        // be wrong.
+        if (keep > 0 && char.IsHighSurrogate(text[keep - 1]))
+            keep--;
+
         return (string.Concat(text.AsSpan(0, keep), TruncationSuffix), true);
     }
 

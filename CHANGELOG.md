@@ -5,21 +5,30 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-The first work on the library. All five packages are built and tested: 367 tests on net8.0 and
-net10.0 needing nothing installed, plus 168 integration tests against PostgreSQL, SQL Server and
+The first work on the library. All five packages are built and tested: 480 tests on net8.0 and
+net10.0 needing nothing installed, plus 202 integration tests against PostgreSQL, SQL Server and
 MongoDB in containers.
 
 ### Added
 - **`DotNetBoost.Auditing.Core`** — the engine and its contracts.
-  - `IAuditRecorder` with `For(entity)` / `For(name, id)` and `Created`/`Updated`/`Deleted` verbs;
-    `IAuditReader`, whose every read is clamped to a page; `IAuditPruner` for retention and
-    erasure; `IAuditStore` for the store packages to implement.
+  - `IAuditManager` — the one service application code injects: `For(entity)` / `For(name, id)`
+    with `Created`/`Updated`/`Deleted` verbs, reads that are always clamped to a page, and
+    retention and erasure. One interface, as in the suite's other three libraries; `scope.md` §10
+    says what the single surface cost. `IAuditStore` for the store packages to implement.
   - `AuditEntry` + `AuditPropertyChange`: two tables, one row per property that changed, no
     foreign key to the application's own tables.
   - `[AuditEntity]`, `[Audited]`, `[AuditIgnore]`, `[AuditRedact]`, `[AuditRetention]`.
   - `AuditSchema.Describe(type)` — the properties of an audited entity and their rules, read from
     `AuditPlan` and cached per type. The rule for *which* properties count lives there too, so a
     description and the recorder cannot drift apart.
+  - `AuditDiff.Between(before, after)` + `InitialValues` / `FinalValues` — the explicit path's
+    stand-in for a change tracker, so a Dapper or MongoDB application reports what moved without a
+    hand-written `if` per property. It leaves out the key (already the entry's address) and
+    `[AuditIgnore]` properties, compares `[AuditRedact]` ones and leaves the withholding to the
+    engine, and skips anything that is not a simple value — a navigation property, a collection, a
+    nested object — which is documented rather than hidden, because that part is silent. Key
+    discovery now lives in one place that both this and `ConventionEntityKeyAccessor` read, so the
+    diff and the addressing cannot disagree about which property is the key.
   - **DotNetBoost Entity Addressing v1**, implemented independently and asserted by the test
     suite. `EntityKey.AddressingVersion` is published for a consumer to compare with
     `DotNetBoost.Media`'s and `DotNetBoost.MultiLingual`'s.
@@ -27,9 +36,240 @@ MongoDB in containers.
 - **Redaction applied in the engine**, not in each capture source, so no later source can forget
   it. `[AuditRedact]` records that a property changed with both values withheld, and a caller
   cannot opt out.
+- **`IAuditObserver` — what the engine decided *not* to record.** Recording returns `null` to say
+  "deliberately not recorded", which a caller on the explicit path may check and the EF Core
+  interceptor cannot: it records changes nobody asked it about, so there was no return value
+  anywhere for it to hand back, and it threw the `null` away. An application that stopped being
+  audited — opt-in turned on, `[AuditIgnore]` reaching a base class, `DeclareEntitiesFrom`
+  forgotten — therefore carried on looking healthy while the trail quietly stopped covering a
+  table, which is unrecoverable by the time anyone goes looking.
+  - Five reasons, each reported with the entity and the action: `RecordingDisabled`,
+    `EntityIgnored`, `NotOptedIn`, `EntityNotDeclared` and `NothingChanged`. `EntityNotDeclared` is
+    deliberately its own reason rather than part of `NotOptedIn` — it means a missing declaration
+    rather than a decision, and they warrant different levels.
+  - A sixth report for the write that *is* recorded but without the model's rules, because nothing
+    is declared under its name. That is the one failure here that cannot be undone: a `[AuditRedact]`
+    property has just gone into the table in full, and the engine cannot infer that it has one, so
+    it says what it does know rather than guessing.
+  - The interceptor reports its own skips, since it decides them before the engine is reached — the
+    reason comes from `AuditRecorder.SuppressionFor` so the rule still lives in one place. The
+    `IsAudited` the discovery endpoint calls stays silent, because reporting from there would
+    describe an HTTP read as a suppressed write.
+  - `.UseObserver<T>()` registers one; the default does nothing, so this costs an application that
+    does not want it a virtual call per suppressed write. `DotNetBoost.Auditing.API` ships the
+    `ILogger`-backed `.UseLoggingObserver()`, which keeps Core's single NuGet dependency intact —
+    warnings for the two suppressions that are usually a misconfiguration, Debug for the three that
+    are configured intent, because a high-churn ignored entity reports one on every save and at any
+    higher level it would be the first thing an operator filtered out.
+
+- **Three counters, on the meter `DotNetBoost.Auditing`.** `entries.recorded` tagged by entity and
+  action, `writes.suppressed` tagged by entity, reason and action, and `entries.deleted` tagged
+  `prune` or `erase`. The first is the one to alert on, and it is the absence that matters: "this
+  entity recorded nothing for an hour" is the shape of every way a trail stops covering a table, and
+  it is the question a suppression report cannot answer — a report is about the writes that *were*
+  declined and says nothing about the ones that should have arrived and did not. The counters are
+  also the only form in which the Debug-level suppressions are visible in production.
+  - **Not an `IAuditObserver` implementation**, deliberately: the observer is registered with
+    `Replace`, so metrics behind it would be switched off by an application that registered an
+    observer of its own, and telemetry should not be something you can turn off by accident. The
+    observer is for what an application must react to; a counter is for what it watches.
+  - Core keeps its single NuGet dependency. `Meter` and `IMeterFactory` are in the shared framework
+    on both target frameworks — which is also why `Activity.Current` was already usable for
+    correlation ids. The engine takes the host's `IMeterFactory` when there is one and owns a meter
+    when there is not, so a console application that only called `AddAuditing()` still starts.
+  - Nothing is emitted until something subscribes, and each instrument is asked whether it is
+    enabled before a tag is built, so an unsubscribed counter is a field read and a branch.
+  - **The entity key and the actor are not tags anywhere.** Both are unbounded — one of those turns
+    a counter into a time series per row or per person — and the actor is personal data the rest of
+    the library is careful with. Both sit on every write, so a test asserts no measurement carries
+    either rather than leaving it to the documentation.
+  - The Aspire defaults subscribe, so the dashboard shows all three for every sample API with no
+    wiring in the samples: creating a product moves `recorded`, and `GET /api/products/{id}` bumps
+    an `[AuditIgnore]` view count so reading one moves `suppressed` instead.
+  - [observability.md](docs/observability.md) is the new page for both halves — the observer and the
+    counters, what each answers, and why the two misconfigurations are warnings rather than
+    instruments of their own.
+
+- **Smaller corrections, each with a reason to care.**
+  - **Truncation no longer splits a surrogate pair.** Cutting a value at the configured limit could
+    leave half of one, which is not a character but invalid UTF-16 — a UTF-8 database either mangles
+    it to U+FFFD or refuses the row, so an emoji landing on the boundary could have cost the whole
+    entry. The pair is dropped instead, making the value one character shorter than the limit.
+  - **`DELETE {prefix}/actor` takes the actor as a query parameter** rather than a path segment. An
+    actor is an opaque identifier the application chose: a subject claim can be a URI and a Windows
+    account carries a backslash, neither of which addresses as a path, so those trails could not be
+    erased through the API at all. A catch-all route would have fixed the slashes and introduced a
+    worse problem — it swallows trailing segments, so `/actor/alice/oops` would have erased for
+    `"alice/oops"` and answered `200` with `"deleted": 0`, a typo indistinguishable from a correct
+    request, on the one endpoint where nothing can be undone. A missing or blank actor is now a
+    `400` rather than a request that reaches the engine.
+  - **An `ArgumentException` from the recording path names the field**, not `value`. All three
+    refusals — entity name, entity key, property name — reported `ParamName` as the engine's own
+    local name, so anything rendering it named nothing useful.
+  - **A failed assembly scan says which assembly and what to do.** `DeclareEntitiesFrom` threw
+    `ReflectionTypeLoadException` with a message that names neither. It is still a refusal rather
+    than the subset of types that did load: carrying on with those would let an `[Audited]` entity
+    among the missing ones record nothing and report nothing, which is the trade the wrong way
+    round.
+  - **The stale `IAuditRecorder` name** is gone from the two package `<Description>` elements that
+    ship to nuget.org, from Core's `InternalsVisibleTo` comment, and from the `.editorconfig`
+    justification for suppressing CA1716.
+  - **limitations.md records what the context believes after a failed deferred save.** EF accepts
+    the primary save's changes before the interceptor's `SavedChanges` runs, so when the deferred
+    write fails the database rolls back correctly while the entity is left `Unchanged` holding the
+    key the INSERT gave it. Measured rather than reasoned about. The save still throws, so the trap
+    is catching it and reusing that context — a later `SaveChanges` would write nothing and lose
+    the row.
+
+- **Keyset paging: `AuditQuery.After` and `AuditPage.NextCursor`.** `Skip`/`Take` made the database
+  read and discard everything before the page, so page 4,000 of a trail cost 200,000 rows to serve —
+  on the one table in an application that only grows. It was also unstable: an entry arriving
+  between two requests shifted every later row by one, so a client walking a live trail saw a row
+  twice and missed another. A cursor costs the same at any depth, and an insert cannot move a row
+  across a boundary defined by the rows themselves.
+  - It works because the ordering every store already issued — `OccurredAt` descending with `Id`
+    as the tiebreaker — is a *total* order. That tiebreaker was there so two entries in the same
+    tick could not swap places between pages; this is what it buys. A timestamp-only cursor would
+    return a tied group again or skip it, which a conformance test pins by stepping through four
+    entries that share an instant, one at a time.
+  - `AuditCursor` carries `(OccurredAt, Id)` and round-trips as one base64url token — URL-safe with
+    no escaping, and readable by anyone debugging rather than pretending to be a secret. It parses
+    back to the tick, because a cursor whose instant moved would silently skip or repeat an entry.
+    Anything the library did not issue is refused rather than read as some other position.
+  - Spelled per store against each engine's own comparison, so the predicate and the `ORDER BY`
+    cannot disagree: `OR` rather than the row-value form `(a, b) < (x, y)`, which PostgreSQL has and
+    SQL Server does not; `Guid.CompareTo` in EF Core, because `Guid` only gained comparison
+    operators in .NET 9 and this package also targets net8.0. Verified against SQL Server's unusual
+    `uniqueidentifier` ordering as well as PostgreSQL's, SQLite's and MongoDB's.
+  - `NextCursor` is derived by the engine from the last entry rather than by each store, so what a
+    cursor points at is defined once. It is **not** a promise that more exist — the last full page
+    carries one and the next request comes back empty, which avoids reading a row past every page
+    to answer a question most callers never ask.
+  - `Skip` with `After` is refused rather than one silently winning: they are two answers to where
+    the page starts, and a read that ignored one would page wrongly and quietly. `Skip` stays, and
+    is still the right tool for a UI with numbered pages — the dashboard uses it for exactly that.
+  - Over HTTP: `?after=` and `nextCursor` on the page. A malformed cursor is a `400` rather than the
+    newest page, which would have left a client looping over page one for ever with nothing to
+    explain why.
+
+- **The public surface is a committed file.** Five packages expose fifty-odd public types between
+  them and nothing in the build objected when one more appeared, so a type added in passing became a
+  compatibility commitment nobody decided to make — a live risk, since four public types were added
+  while this changelog entry's siblings were being written. `SurfaceTests` renders each package's
+  surface and compares it to `PublicApi.txt` beside that project, so every addition, removal and
+  re-signing turns up as a diff next to the code that caused it, with `DOTNETBOOST_SURFACE=update`
+  to accept one deliberately.
+  - Not `Microsoft.CodeAnalysis.PublicApiAnalyzers`, which is the standard answer and fails the
+    build rather than the suite — better, except that its baseline can only be *created* by its IDE
+    code fix (`dotnet format` does not apply it), and a file regenerable only inside an IDE does not
+    belong in a repository driven entirely from the command line.
+  - Rendering the format here bought two things the analyzer would not have given: the baselines are
+    shared between both shipped frameworks, so a member present on net10.0 and absent on net8.0
+    fails on the run that disagrees; and the text reads as C#, because the point is that a person
+    reviews the diff. Fully qualified and carrying nullability, so a namespace move and a `string` →
+    `string?` both show up — the two surface breaks that are easiest to make by accident.
+
+- **`AuditingOptions.Enabled` no longer claims to be flippable from configuration.** It never was:
+  there is no binding and no `IOptionsMonitor`, so the value is read once at startup and changing it
+  takes a restart. The documentation now says that, and says what you *can* do — read it from
+  configuration when registering — rather than promising a runtime switch the engine does not have.
+  It was the last place in the library where the docs described behaviour the code does not have.
+
+- **Scale is measured, and the measurement found a defect.** `ScaleTests` builds a million-entry
+  trail and times four things on PostgreSQL 16. It is skipped unless `DOTNETBOOST_SCALE=run` is set
+  and is not in the CI workflow's list of test projects, because a benchmark is not a gate: the
+  numbers move with the machine, and failing a build on them would mean failing builds nobody can
+  act on. What it produces is a dated paragraph in [testing.md](docs/testing.md) with the hardware
+  named, so a reader can tell measurement from reasoning.
+  - **The keyset predicate was costing 120-fold more than it needed to.** The first run measured
+    23ms for a page at depth 500,000 and 116 seconds to walk there — nothing like the constant cost
+    the documentation claimed. `EXPLAIN` said why: the portable
+    `a < @a OR (a = @a AND b < @b)` reaches the planner as a **Filter** on an index scan, so a
+    deeper page reads and discards more rows, while the row-value form `(a, b) < (@a, @b)` becomes
+    an **Index Cond** and seeks. The Dapper store now issues row values wherever the engine has
+    them; the same page went **23ms → 0.1ms** and the walk **116s → 1.4s**. SQL Server has no
+    row-value comparison and keeps the OR, so the flat cost does not hold there — stability does,
+    because that is a property of what a cursor is rather than of how the predicate is written.
+  - The prune is vindicated: 913,613 entries in 914 batches took 7.1s, 8ms mean per batch and
+    **49ms slowest** — and the slowest single batch is the number the batching exists to bound,
+    because it is the longest a recording can be waiting behind a sweep.
+  - Both indexes earn their place against a selective question: one entity's newest 50 is 1.3ms
+    against 19.9ms with the candidate indexes dropped, and a rare property's changes 0.5ms against
+    13.1ms.
+  - **Two of the four measurements were wrong on the first run, in the direction that flattered the
+    library**, and the comments now say what they used to measure: dropping one index left a second
+    that could serve the same read, and the per-property query asked for half the table, where a
+    sequential scan beating an index is correct behaviour and evidence about nothing.
+
+- **Concurrency is tested, against PostgreSQL.** Four tests for what happens when several things
+  use a trail at once: eight writers on their own connections, eight scopes saving through the EF
+  Core interceptor at the same time — every one down the deferred path, which is the most intricate
+  code in the library and had never been run concurrently — a prune sweeping while recording
+  continues, and a cursor walk with an entry arriving between every page. Nothing asserts a
+  duration; every assertion is a count, a set or an absence, so a slow container cannot fail them.
+  - PostgreSQL rather than SQLite, because SQLite's shared cache admits one writer and two
+    connections contending there say more about SQLite than about this library.
+  - The prune test is the evidence for the batching: a sweep and eight writers overlap, nothing
+    deadlocks, every old entry goes and every new one stays. The cutoff being fixed when the sweep
+    starts is what makes the second half true by construction.
+  - The paging test doubles as evidence for the cursor. Replacing `After` with `Skip` in it turns
+    250 milliseconds into more than ten minutes: each arrival pushes a row back into the part not
+    yet walked, so the walk never reaches an empty page. Offset paging under concurrent writes is
+    usually described as showing a row twice — it can also simply never finish.
+
+- **Fixed: two audited writes on one connection could corrupt each other.** The Dapper store
+  borrows the scope's `IDbConnection` — which the application can inject too — with "open it if it
+  is closed, close it if I opened it". That is a check-then-act on shared state: two concurrent
+  writes could both find it closed, both open it, and then the first to finish would close it while
+  the second was still issuing statements. The window is as wide as a connection takes to open, a
+  network round trip for anything but SQLite, which makes it one of the easier races to lose rather
+  than a theoretical one.
+  - What it cost, reproduced: `ArgumentNullException: SafeHandle cannot be null` from inside the
+    native SQLite driver, and **40 of 20,001 entries written**. A meaningless error and a
+    half-written trail, which for an auditing library is the worst available pair of outcomes.
+  - The store now serialises its own operations per connection, so a second write queues behind the
+    first. That is not a performance decision: an ADO.NET connection cannot run two commands at
+    once, so the two have to take turns whatever the library does — the only question was whether
+    they take turns or corrupt each other. The schema bootstrap goes through the same gate.
+  - It cannot cover the application running *its own* commands on that connection concurrently with
+    the library; nothing inside this library can. [limitations.md](docs/limitations.md) says so, and
+    says to give parallel work its own scope.
+  - Three tests: the ordering invariant, deterministic and with no sleeps; the end-to-end scenario
+    above, which fails two ways out of three without the fix on every run; and that a connection the
+    *application* opened is still never closed by the store.
+
+- **Documented: an erasure finishes when the trail is empty, not at a cutoff.** A prune's cutoff is
+  fixed at the start, so it is finite by construction; erasure has no cutoff, so an actor who is
+  still recording extends their own erasure. Arithmetic rather than a risk — a batch deletes a
+  thousand entries per round trip — and the reachable cost is duration rather than non-termination.
+  Deliberately untested: the first attempt at a live-writer test was a lock-contention storm that
+  said more about SQLite's single writer than about the loop, and a flaky test there would be worse
+  than the note.
+
 - **Retention that a prune actually honours.** `AuditPruneScope` exists so that an entity with a
   longer `[AuditRetention]` than the configured default survives the global sweep — without the
   exclusion, a per-entity retention would be silently the opposite of what it says.
+
+- **Erasure is batched in both relational stores**, like the prune already was. The ids of an
+  erasure go into the DELETE as an `IN` list, which Dapper expands to one parameter per id and
+  EF Core may translate the same way — so an unbatched erasure of a long trail did not run slowly,
+  it threw: SQL Server at 2,100 entries, SQLite at 32,766. On the path a subject-access deletion
+  request takes, which is the worst place for a size limit nobody wrote down. Erasure still takes
+  no batch size and is complete when it returns, because an erasure that stopped half way and
+  reported a count would read as a successful one; the store keeps itself within its engine's
+  limits because that is the store's business and not the caller's. A cancelled erasure throws
+  having deleted whole batches, and is safe to run again. Guarded at both levels: the conformance
+  suite erases a trail of 2,500 across every store and engine, past SQL Server's ceiling, and each
+  relational store has a test over 40,000 that fails without the fix and needs no Docker.
+
+- **A prune's `batchSize` is honoured whatever the dialect's parameter ceiling.** The Dapper store
+  groups its DELETE by what one statement can carry — every id on PostgreSQL, where `= ANY(@Ids)`
+  is a single parameter, a thousand at a time elsewhere — rather than lowering the batch to fit.
+  The batch is the caller's to choose, and `DeleteOlderThanAsync` promising that a short return
+  means the backlog is clear is what the drain loop reads: clamping the batch would have stopped a
+  prune after one round with entries still past their retention, which is a silent under-delete and
+  worse than the throw it would be avoiding. The REST prune endpoint takes a batch size from the
+  request body, so this was reachable from outside.
 
 - **`DotNetBoost.Auditing.EntityFrameworkCore`** — the capture and the store.
   - A `SaveChangesInterceptor` that records `Modified` and `Deleted` entities **in the caller's own
@@ -131,7 +371,7 @@ MongoDB in containers.
   which is also one parameter rather than one per id and so has no 2100-parameter ceiling.
 
 ### Added — testing
-- **`DotNetBoost.Auditing.IntegrationTests`** — 168 tests against **PostgreSQL 16, SQL Server 2022
+- **`DotNetBoost.Auditing.IntegrationTests`** — 202 tests against **PostgreSQL 16, SQL Server 2022
   and MongoDB 7 (as a replica set)** in Testcontainers.
   - A **conformance suite**: one set of contract tests inherited once per store and engine, so all
     five combinations are shown answering the same questions the same way. The one place the stores
@@ -169,7 +409,7 @@ MongoDB in containers.
   and nothing in any endpoint. Each endpoint demonstrates one thing — the deferred key on a
   creation, only-what-moved on an update, an `[AuditIgnore]` counter that records nothing, a trail
   that outlives the row it describes, and a set-based `ExecuteUpdate` the change tracker never sees
-  recorded explicitly through `IAuditRecorder` — rounded in the statement *and* in the entry, by the
+  recorded explicitly through `IAuditManager` — rounded in the statement *and* in the entry, by the
   same rule, so the recorded new value is exactly what the column ends up holding.
   - **No authentication and no authorization.** `SystemActorAccessor.cs` records every entry
     against `"system"`, and `MapAuditEndpoints` is opened with `RequireAuthorization = false`
@@ -213,6 +453,67 @@ MongoDB in containers.
   - The UI distinguishes the three absences a trail viewer usually conflates: a redacted value
     (withheld on purpose), a `null` (never stored), and `total: null` (not counted, which is not
     zero — paging falls back to "there might be more").
+
+### Documentation
+- **The README opens with a runnable quick start.** It used to open with the three capture
+  sources, the model attributes, bounded reads and retention, so the first thing a reader met was
+  the design rather than a working trail. It now follows the shape `DotNetBoost.Settings`,
+  `.Media` and `.MultiLingual` use — quick start, using it in your own code, using your existing
+  database, what else it can do, the demo, packages — and each piece of reasoning it used to carry
+  is a row in its guide table pointing at the page that already held it in full: `scope.md`,
+  `stores.md`, `limitations.md`, `rest-api.md`. "What it is, and what it is not" stays, trimmed to
+  the table and one paragraph, because it is what stops someone adopting this for request logging.
+  - The quick start is an application that was built and run, not a sketch: every C# block in the
+    file compiles against `src/`, and the trail in its last step is that run's own response, with
+    the fields it trims named under the block. Because nothing is on NuGet yet it adds project
+    references and says what those three lines become once the packages are published, rather than
+    printing a `dotnet add package` that cannot work today.
+  - Two of its snippets were wrong and are corrected. Reads and prunes were still shown on
+    `reader.` and `pruner.`, which the merge into `IAuditManager` removed, and
+    `UpdatedAsync(changes, ct)` does not compile at all — the second positional parameter is
+    `metadata` — so every explicit call now passes `ct: ct`.
+
+- **`docs/configuration-reference.md`** — every builder method, every option on
+  `AuditingOptions` with its default, the attributes, each store's own options, `AuditEndpointOptions`
+  and what `Build()` refuses. It was written because eight builder methods and four options had no
+  page at all: `WithRetention`, `WithPageSize`, `WithMaxValueLength`,
+  `WithoutCreatedAndDeletedValues`, `DisableRecording`, `UseActorAccessor`, `UseEntityKeyAccessor`
+  and `UseCustomStore`, and `Enabled`, `RecordCreatedValues`, `RecordDeletedValues` and
+  `DefaultPageSize`. The security defaults that differ from the sibling packages carry their reason
+  in the table, and `DestructivePolicy` says it is required *on top of* `Policy`.
+- **`docs/architecture.md`** — the layer diagram, the engine's three internal classes, and the
+  things that were in the code and nowhere else: that every rule is applied in `AuditRecorder` so no
+  capture source can forget one, that `IAuditStore` is deliberately dumb and has **no update verb**,
+  that `DeleteOlderThanAsync` takes an `AuditPruneScope` because a longer per-entity retention must
+  be excluded from the global sweep rather than caught by it, and that durability — the one
+  difference the store contract cannot hide — is a `FlushAsync` hook in the conformance suite rather
+  than behaviour left unwritten. Plus each package's real dependency set, the repository layout and
+  how the suites are run.
+  - Both pages were checked against the tree rather than written from memory: every member named
+    resolves in `src/`, every stated default matches its field initialiser, the store has exactly
+    seven verbs, and every path in the layout tree exists.
+  - `scope.md` §§1–3 and §10 stay where they are, though an architecture page would otherwise take
+    them. Those section numbers are cited from the docs index, the README, this file and
+    `IAuditManager`'s XML docs, so renumbering would break a dozen references to buy a tidier split.
+- **The docs index no longer advertises holes that are not there.** Its "Still to write" table
+  listed pages with nothing beside them, so a reader looking for redaction, retention, recording or
+  the read verbs was told the page does not exist — when each is written, in `scope.md` §§6–9. Every
+  planned page now names where to read that material today. The three sample READMEs it links were
+  missing from it.
+- **The three sample READMEs are on one skeleton**, the one the sibling libraries' samples use, so a
+  reader who has read one knows where to look in the next. `SampleApp` had no "trying it" section at
+  all and a `curl` block orphaned inside its authorization section; that is now the start of a tour
+  which was **run** against a throwaway PostgreSQL and says what came back, and the security caveat
+  moved to the end where the siblings keep theirs. The Dapper page promised "two things" and listed
+  three; the MongoDB page's four sections became one, keeping Atomicity on its own because it is why
+  that sample exists. Both claimed the shared DTOs are compiled into "both projects" — the csproj
+  files link them into all three.
+
+With these two pages the documentation set matches the suite's. `architecture.md`,
+`configuration-reference.md`, `aspire.md`, `dashboard.md` and `rest-api.md` are in all three sibling
+libraries and `limitations.md` in two of them. `scope.md`, `stores.md` and `testing.md` have no
+counterpart there, deliberately — `stores.md` is named for what the API calls them (`IAuditStore`,
+`UseCustomStore`), and the other two carry material the siblings never had to write down.
 
 ### Notes
 - The library depends on no other DotNetBoost package and names none of them. Composition with

@@ -171,7 +171,23 @@ public sealed class InMemoryAuditStore : IAuditStore
         && (query.CorrelationId is null || entry.CorrelationId == query.CorrelationId)
         && (query.From is null || entry.OccurredAt >= query.From)
         // Exclusive, so consecutive windows do not double-count.
-        && (query.To is null || entry.OccurredAt < query.To);
+        && (query.To is null || entry.OccurredAt < query.To)
+        && After(entry, query.After);
+
+    /// <summary>
+    /// Whether <paramref name="entry"/> sorts strictly after <paramref name="cursor"/> in the
+    /// ordering <see cref="Ordered"/> produces.
+    /// </summary>
+    /// <remarks>
+    /// Newest first, so "after" means older — and at the same instant, a smaller id. The second
+    /// half is what the id tiebreaker is for: without it, two entries recorded in the same tick
+    /// would have no defined position and a cursor between them would return one of them twice or
+    /// neither. The real stores spell the same predicate in SQL and in a BSON filter.
+    /// </remarks>
+    private static bool After(AuditEntry entry, AuditCursor? cursor) =>
+        cursor is not { } position
+        || entry.OccurredAt < position.OccurredAt
+        || (entry.OccurredAt == position.OccurredAt && entry.Id.CompareTo(position.Id) < 0);
 
     private static bool InScope(AuditEntry entry, AuditPruneScope scope) =>
         (scope.EntityName is null || entry.EntityName == scope.EntityName)

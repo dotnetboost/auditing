@@ -3,6 +3,7 @@ using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.Diagnostics.Metrics;
 using System.Reflection;
 
 namespace Microsoft.Extensions.DependencyInjection
@@ -46,15 +47,30 @@ namespace Microsoft.Extensions.DependencyInjection
             services.TryAddSingleton<IAuditActorAccessor, NullAuditActorAccessor>();
             services.TryAddSingleton<IEntityKeyAccessor, ConventionEntityKeyAccessor>();
 
+            // Told when a change is deliberately not recorded. The default does nothing, so an
+            // application that does not ask for it pays a virtual call per suppressed write — and
+            // one that does ask gets the only signal there is that a trail has stopped covering
+            // something. DotNetBoost.Auditing.API has the ILogger-backed one.
+            services.TryAddSingleton<IAuditObserver, NullAuditObserver>();
+
+            // Three counters, on the meter named by AuditingTelemetry.MeterName. GetService rather
+            // than GetRequiredService: an ASP.NET Core host has an IMeterFactory registered and a
+            // console application that only called AddAuditing() does not, and a library that
+            // refused to start over telemetry nobody subscribed to would deserve the bug report.
+            services.TryAddSingleton(sp => new AuditMetrics(sp.GetService<IMeterFactory>()));
+
             // An empty registry until Build() replaces it, so an engine built without declarations
             // applies no model rules by name rather than failing to resolve.
             services.TryAddSingleton(AuditModelRegistry.Empty);
 
             // Scoped: the store is (an EF Core DbContext, a Dapper connection), and the engine is
             // only as long-lived as the store behind it.
-            services.TryAddScoped<IAuditRecorder, AuditRecorder>();
-            services.TryAddScoped<IAuditReader, AuditReader>();
-            services.TryAddScoped<IAuditPruner, AuditPruner>();
+            // The three engines are registered as themselves, not behind interfaces: they are
+            // internal, and IAuditManager is the library's whole public surface.
+            services.TryAddScoped<AuditRecorder>();
+            services.TryAddScoped<AuditReader>();
+            services.TryAddScoped<AuditPruner>();
+            services.TryAddScoped<IAuditManager, AuditManager>();
 
             var builder = new AuditingBuilder(services);
             configure(builder.Options);
@@ -225,6 +241,39 @@ namespace Microsoft.Extensions.DependencyInjection
 
             // Scoped, not singleton: an accessor worth registering reads something per-request.
             builder.Services.Replace(ServiceDescriptor.Scoped<IAuditActorAccessor, TAccessor>());
+            return builder;
+        }
+
+        /// <summary>
+        /// Uses <typeparamref name="TObserver"/> to watch what the engine decides not to record.
+        /// <code>
+        /// services.AddAuditing()
+        ///         .UseEntityFrameworkCore&lt;AppDbContext&gt;()
+        ///         .UseObserver&lt;MyMetricsObserver&gt;()
+        ///         .Build();
+        /// </code>
+        /// <para>
+        /// The default does nothing. An ASP.NET application usually wants
+        /// <c>.UseLoggingObserver()</c> from <c>DotNetBoost.Auditing.API</c> instead of writing
+        /// one; this overload is for sending the same signal somewhere else — a counter, a health
+        /// check, an alert.
+        /// </para>
+        /// </summary>
+        /// <typeparam name="TObserver">The observer implementation.</typeparam>
+        /// <param name="builder">The auditing builder.</param>
+        /// <returns>The builder, for chaining.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <c>null</c>.</exception>
+        /// <remarks>
+        /// Singleton, not scoped: an observer counts and logs rather than reading anything about a
+        /// request, and one that needs per-request state can inject an accessor for it.
+        /// <see cref="IAuditObserver"/> says what an implementation may not do — throw, or block.
+        /// </remarks>
+        public static AuditingBuilder UseObserver<TObserver>(this AuditingBuilder builder)
+            where TObserver : class, IAuditObserver
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+
+            builder.Services.Replace(ServiceDescriptor.Singleton<IAuditObserver, TObserver>());
             return builder;
         }
 

@@ -16,11 +16,11 @@ entities, so the difference is something to run rather than read: `samples/Sampl
 |---|---|---|---|
 | Status | **Built**, proven on PostgreSQL + SQL Server | **Built**, proven on PostgreSQL + SQL Server | **Built**, proven on MongoDB 7 |
 | Shape | Two tables | Two tables | **One collection**, changes embedded |
-| Capture | Automatic, from the change tracker | Explicit, through `IAuditRecorder` | Explicit |
+| Capture | Automatic, from the change tracker | Explicit, through `IAuditManager` | Explicit |
 | `AppendAsync` | **Tracks**; your `SaveChanges` commits | **Writes**, there and then | **Writes**, there and then |
 | An entry is complete in one write | With a transaction | With a transaction | **Always** — it is one document |
 | Atomic with the change | **By default** | **With your transaction** | With a session, on a replica set |
-| Before-images | Read from the change tracker | Supplied by you | Supplied by you |
+| Before-images | Read from the change tracker | Supplied by you; compared by `AuditDiff` | Supplied by you; compared by `AuditDiff` |
 | Redaction rules | From the entity type | **Needs `DeclareEntitiesFrom`** | **Needs it too** |
 | Timestamp precision | 100ns ticks | 100ns ticks | **Milliseconds** |
 
@@ -58,6 +58,32 @@ await audit.For("Product", "42").UpdatedAsync(
     new AuditChange(nameof(Product.Price), 24.99m, 19.99m)
 ], ct);
 ```
+
+**The comparison does not have to be.** `AuditDiff` is Core's stand-in for the change tracker: it
+reports what moved between two instances, so the one part of the explicit path that is easy to get
+wrong by hand is read off the type instead.
+
+```csharp
+var changes = AuditDiff.Between(before, after);     // only what moved
+if (changes.Count == 0) return;                     // nothing did
+
+await audit.For(after).UpdatedAsync(changes, ct);
+
+await audit.For(product).CreatedAsync(AuditDiff.InitialValues(product), ct: ct);
+await audit.For(product).DeletedAsync(AuditDiff.FinalValues(product), ct: ct);
+```
+
+It compares the properties the engine reasons about and skips three kinds: the key, which is already
+the entry's address; `[AuditIgnore]` properties, so an update that moved only those comes back empty
+rather than as an entry that says a change happened and never which; and anything that is not a
+simple value — a navigation property, a collection, a nested object — because comparing those by
+reference reports a change on every write. Those are skipped **silently**, so an entity whose
+interesting state lives in a nested object still reports it by hand. `[AuditRedact]` properties *are*
+compared: the comparison is in memory, and withholding the values stays the engine's job.
+
+The point of it is not the keystrokes. A hand-written `if` chain is correct the day it is written and
+stops mentioning the property somebody adds to the entity next year, which is a gap nothing fails
+over — the trail just quietly stops recording it.
 
 **Atomicity is yours to arrange.** `AppendAsync` issues its INSERTs when it is called, so without a
 transaction the entry commits by itself and a failure immediately afterwards leaves a trail of a
@@ -137,8 +163,10 @@ services.AddAuditing()
         .Build();
 ```
 
-Recording is explicit, exactly as with Dapper, and `DeclareEntitiesFrom` matters for the same
-reason: everything is addressed by name, so without it redaction has no type to read.
+Recording is explicit, exactly as with Dapper — including `AuditDiff` for the comparison, which
+reads the entity's properties and so knows nothing about either store — and `DeclareEntitiesFrom`
+matters for the same reason: everything is addressed by name, so without it redaction has no type to
+read.
 
 ### One collection, not two
 

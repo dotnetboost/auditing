@@ -69,6 +69,38 @@ public class Unkeyed
     public string Label { get; set; } = "";
 }
 
+/// <summary>The states a shipment can be in — an enum, which a diff has to compare as a value.</summary>
+public enum ShipmentStatus
+{
+    Pending = 0,
+    Dispatched = 1
+}
+
+/// <summary>
+/// The property shapes a reflection diff has to be right about: a nullable value, a
+/// <c>byte[]</c> that has to be compared by content, an enum, and the two kinds of property it must
+/// not compare at all — a navigation to another entity and a collection.
+/// </summary>
+public class Shipment
+{
+    public int Id { get; set; }
+
+    public string? Reference { get; set; }
+
+    public DateOnly? DispatchedOn { get; set; }
+
+    public ShipmentStatus Status { get; set; }
+
+    /// <summary>A concurrency token. Two reads of one row give two arrays holding the same bytes.</summary>
+    public byte[] RowVersion { get; set; } = [];
+
+    /// <summary>A navigation property. Comparing it by reference would report a change on every write.</summary>
+    public PersonEntity? Recipient { get; set; }
+
+    /// <summary>A collection. Same problem, and nothing a single trail column could hold.</summary>
+    public List<string> Labels { get; set; } = [];
+}
+
 /// <summary>A clock that does not move, so an assertion about a timestamp is an equality.</summary>
 internal sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
 {

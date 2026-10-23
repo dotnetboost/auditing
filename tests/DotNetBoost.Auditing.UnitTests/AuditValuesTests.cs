@@ -1,5 +1,6 @@
 using DotNetBoost.Auditing.Core.Services;
 using System.Globalization;
+using System.Text;
 
 namespace DotNetBoost.Auditing.UnitTests;
 
@@ -74,6 +75,41 @@ public class AuditValuesTests
 
         Assert.False(truncated);
         Assert.Equal(new string('x', 10), text);
+    }
+
+    [Fact]
+    public void Truncation_never_splits_a_surrogate_pair()
+    {
+        // Each emoji is two chars, so an odd limit lands the cut between the halves of one. Half a
+        // surrogate pair is not a character — it is invalid UTF-16, which a UTF-8 database either
+        // mangles into U+FFFD or refuses outright.
+        var emoji = string.Concat(Enumerable.Repeat("\U0001F600", 20));
+
+        for (var limit = 2; limit <= 20; limit++)
+        {
+            var (text, truncated) = AuditValues.Format(emoji, limit);
+
+            Assert.True(truncated);
+            Assert.True(text!.Length <= limit, $"limit {limit} produced {text.Length} chars");
+
+            // Round-tripping through UTF-8 replaces a lone surrogate, so a value that survives it
+            // unchanged contains none. This is the same encoding the database does.
+            Assert.Equal(text, Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(text)));
+        }
+    }
+
+    [Fact]
+    public void Dropping_a_split_pair_costs_a_character_rather_than_validity()
+    {
+        // The marker takes one char, so the cut lands inside a pair at an EVEN limit: at four, the
+        // two chars kept would be the second half of one emoji and the first half of the next. The
+        // pair goes entirely instead, leaving one emoji and the marker — three chars where four
+        // were allowed. Shorter than the limit is the right way to be wrong.
+        var (text, truncated) = AuditValues.Format("\U0001F600\U0001F600\U0001F600", 4);
+
+        Assert.True(truncated);
+        Assert.Equal("\U0001F600" + AuditValues.TruncationSuffix, text);
+        Assert.Equal(3, text!.Length);
     }
 
     [Fact]

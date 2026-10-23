@@ -21,7 +21,7 @@ public sealed record AuditChange(string PropertyName, object? OldValue, object? 
 public sealed record AuditWrite
 {
     /// <summary>
-    /// The entity's stored name. Set it through <c>IAuditRecorder.For(entity)</c> rather than by
+    /// The entity's stored name. Set it through <c>IAuditManager.For(entity)</c> rather than by
     /// hand where there is a type to read it from: that applies
     /// <see cref="Metadata.AuditEntityNames"/>, which unwraps proxies and honours
     /// <c>[AuditEntity]</c>.
@@ -32,7 +32,7 @@ public sealed record AuditWrite
     public required string EntityId { get; init; }
 
     /// <summary>
-    /// The entity's CLR type, when the caller has one. Set by <c>IAuditRecorder.For(entity)</c>;
+    /// The entity's CLR type, when the caller has one. Set by <c>IAuditManager.For(entity)</c>;
     /// <c>null</c> for a write addressed by name and key alone.
     /// <para>
     /// It is how the engine finds the model's <c>[AuditIgnore]</c> and <c>[AuditRedact]</c> rules.

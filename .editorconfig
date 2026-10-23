@@ -28,7 +28,7 @@ indent_size = 2
 [*.md]
 trim_trailing_whitespace = false
 
-# CA1716: `IAuditRecorder.For(...)` mirrors `IMediaManager.For(...)`, `ISettingManager.For<T>()`
+# CA1716: `IAuditManager.For(...)` mirrors `IMediaManager.For(...)`, `ISettingManager.For<T>()`
 # and `IMultiLingualManager.For(...)`, so all four libraries read the same way. It collides with
 # VB keywords only, as it does in the other three.
 [*.cs]

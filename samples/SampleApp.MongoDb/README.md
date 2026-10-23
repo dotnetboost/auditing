@@ -2,33 +2,44 @@
 
 The EF Core sample (`samples/SampleApp`) over the MongoDB store. Same `Product` and `StockCheck`,
 same attributes, same routes, same request and response bodies — the DTOs and the actor accessor are
-*the same files*, compiled into both projects — so `clients/dashboard` can be pointed at any of the
-three APIs without a change.
+*the same files*, compiled into all three sample projects — so `clients/dashboard` can be pointed at
+any of the three APIs without a change.
 
 The recording is the same explicit recording as `samples/SampleApp.Dapper`'s, line for line in
-places. That is the honest summary of the explicit path: it costs the same whatever the engine, and
-its two halves are a read for the before-image and a call per change. What is specific to *this*
-store is the shape of an entry, and where the atomicity goes.
+places — including `AuditDiff.Between(before, after)` for the comparison, which reads the entity's
+properties and so knows nothing about either store. That is the honest summary of the explicit path:
+it costs the same whatever the engine, and its two halves are a read for the before-image and a call
+per change. What is specific to *this* store is the shape of an entry, and where the atomicity goes.
 
-## One collection, changes embedded
+## What differs, and where to look
 
-The relational stores keep the property changes in a table of their own; this store embeds them in
-the entry document. The reason the relational stores give is indexability — in SQL, a JSON column
-makes "every change anyone ever made to `Price`" an unindexable scan — and it does not carry over,
-because MongoDB indexes the fields of an array natively. `UseMongoDb()` creates a multikey index on
-`Changes.PropertyName` for exactly that question.
-
-Two things follow, and both are visible from the endpoints:
-
-- **An entry is always complete.** `POST /api/products` writes the whole entry in one insert, so
-  there is no window in which the trail holds an entry whose property rows have not arrived. The
-  relational stores need a transaction for that.
-- **Deleting an entry takes its changes with it.** `POST /api/maintenance/prune` issues no second
-  delete and depends on no cascade.
+**One collection, with the changes embedded.** The relational stores keep the property changes in a
+table of their own; this store embeds them in the entry document. Their reason is indexability — in
+SQL, a JSON column makes "every change anyone ever made to `Price`" an unindexable scan — and it
+does not carry over, because MongoDB indexes the fields of an array natively. `UseMongoDb()` creates
+a multikey index on `Changes.PropertyName` for exactly that question. Two things follow, both
+visible from the endpoints: `POST /api/products` writes a **complete** entry in one insert, with no
+window in which the property rows have not arrived, and a prune's delete **takes the changes with
+it**, with no second statement and no cascade.
 
 Open mongo-express from the Aspire dashboard and look at one document in `auditEntries`: the id is a
 **standard** UUID rather than the driver's legacy binary subtype, and `Action` is stored as its name
 rather than its number — a document is read by people as often as by code.
+
+**`DeclareEntitiesFrom` does the same three jobs as in the Dapper sample**: it gives the engine a
+type to read `[AuditRedact]` and `[AuditIgnore]` from for a write addressed **by name**, it is how a
+prune finds `StockCheck`'s own 30-day retention, and it is what `GET /api/audit/entities` answers
+with. Undeclared, a name-addressed write puts a redacted property into the entry document in full —
+silently, and permanently.
+
+**Two details are this sample's, not the library's.** Keys are `int` from a counters collection
+(`Data/IdSequence.cs`), because MongoDB generates no integers and these documents keep `int` keys so
+the routes, the responses and the dashboard are unchanged — a greenfield model would use an
+`ObjectId` and delete that file. One consequence favours this store: the key exists *before* the
+insert, so recording never waits for the write, which is the problem the EF Core store solves with a
+deferred second save. And `Price` and `SupplierCost` carry `[BsonRepresentation(BsonType.Decimal128)]`,
+because the driver's default for `decimal` is a *string* that sorts lexicographically — a query for
+"everything under ten" would answer nonsense.
 
 ## Atomicity: the window this sample shows instead of hiding
 
@@ -63,31 +74,6 @@ docker run -d --name auditing-mongo -p 27017:27017 mongo:7 --replSet rs0 --bind_
 ```bash
 docker exec auditing-mongo mongosh --quiet --eval 'rs.initiate()'
 ```
-
-## Two things that are not about this library
-
-**Keys are `int`, from a counters collection.** MongoDB generates no integers; `Data/IdSequence.cs`
-does, with the standard `findAndModify` pattern. A greenfield model would use an `ObjectId` and
-delete that file — these documents keep `int` keys so the routes, the responses and the dashboard are
-unchanged. One consequence is in this store's favour: the key exists *before* the insert, so
-recording never has to wait for the write, which is the problem the EF Core store solves with a
-deferred second save.
-
-**`Price` and `SupplierCost` carry `[BsonRepresentation(BsonType.Decimal128)]`.** The driver's
-default for `decimal` is a *string*, which sorts and compares lexicographically — a query for
-"everything under ten" would answer nonsense, and arithmetic in an aggregation would refuse
-outright.
-
-## What `DeclareEntitiesFrom` is doing here
-
-The same three jobs as in the Dapper sample: it gives the engine a type to read `[AuditRedact]` and
-`[AuditIgnore]` from for writes addressed **by name**, it is how a prune finds `StockCheck`'s own
-30-day retention, and it is what `GET /api/audit/entities` answers with. For a name-addressed write,
-undeclared means a redacted property goes into the entry document in full — silently, and
-permanently.
-
-Every write in this sample goes through `audit.For(entity)`, which carries the type, so the
-redaction here does not depend on it. The retention and the discovery endpoint do.
 
 ## Run it
 
@@ -159,7 +145,7 @@ Identical to the EF Core sample's, and each one records what the interceptor wou
 | | |
 |---|---|
 | `POST /api/products` | Key from the counter, one insert for the document and one for the entry |
-| `PUT /api/products/{id}` | A read for the before-image, a replace, then `UpdatedAsync` with only what moved |
+| `PUT /api/products/{id}` | A read for the before-image, a replace, then `UpdatedAsync` with what `AuditDiff.Between` found |
 | `GET /api/products/{id}` | Bumps the `[AuditIgnore]` view count **and reports it** — the engine returns `null` |
 | `DELETE /api/products/{id}` | `findOneAndDelete`, so the final values come back in the same round trip |
 | `GET /api/products/{id}/history` | One entity's trail — and it still answers for a deleted product |

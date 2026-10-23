@@ -2,6 +2,7 @@ using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
 using DotNetBoost.Auditing.Core.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 
 namespace DotNetBoost.Auditing.EntityFrameworkCore;
 
@@ -13,6 +14,17 @@ namespace DotNetBoost.Auditing.EntityFrameworkCore;
 /// <param name="context">The context holding the two tables.</param>
 public sealed class EfCoreAuditStore(DbContext context) : IAuditStore
 {
+    /// <summary>
+    /// How many entries an erasure deletes per round trip.
+    /// <para>
+    /// Not configurable, and not taken from the prune's <c>batchSize</c>: the erasure verbs on
+    /// <see cref="IAuditStore"/> deliberately have no batch parameter, because how a store keeps
+    /// within its provider's limits is the store's business rather than the caller's. A thousand is
+    /// the prune's default, and low enough that no provider's parameter ceiling is in reach.
+    /// </para>
+    /// </summary>
+    private const int EraseBatchSize = 1000;
+
     private readonly DbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
     private DbSet<AuditEntry> Entries => _context.Set<AuditEntry>();
@@ -31,7 +43,7 @@ public sealed class EfCoreAuditStore(DbContext context) : IAuditStore
     /// failure in between would leave a trail of something that never happened.
     /// <para>
     /// For the interceptor this is exactly right: the rows join the save already in flight. For an
-    /// explicit <c>IAuditRecorder</c> call it means the entry is durable when <b>you</b> call
+    /// explicit <c>IAuditManager</c> call it means the entry is durable when <b>you</b> call
     /// <c>SaveChangesAsync</c> on your context, which is the next thing an EF Core application does
     /// anyway. If you record against a context with nothing else pending, save it.
     /// </para>
@@ -127,32 +139,65 @@ public sealed class EfCoreAuditStore(DbContext context) : IAuditStore
     }
 
     /// <inheritdoc/>
-    public async Task<int> DeleteForEntityAsync(string entityName, string entityId, CancellationToken ct = default)
+    public Task<int> DeleteForEntityAsync(string entityName, string entityId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(entityName);
         ArgumentException.ThrowIfNullOrWhiteSpace(entityId);
 
-        var ids = await Entries.AsNoTracking()
-            .Where(e => e.EntityName == entityName && e.EntityId == entityId)
-            .Select(e => e.Id)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        return ids.Count == 0 ? 0 : await DeleteByIdAsync(ids, ct).ConfigureAwait(false);
+        return EraseAsync(e => e.EntityName == entityName && e.EntityId == entityId, ct);
     }
 
     /// <inheritdoc/>
-    public async Task<int> DeleteForActorAsync(string actor, CancellationToken ct = default)
+    public Task<int> DeleteForActorAsync(string actor, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
 
-        var ids = await Entries.AsNoTracking()
-            .Where(e => e.Actor == actor)
-            .Select(e => e.Id)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        return EraseAsync(e => e.Actor == actor, ct);
+    }
 
-        return ids.Count == 0 ? 0 : await DeleteByIdAsync(ids, ct).ConfigureAwait(false);
+    /// <summary>
+    /// Deletes every entry <paramref name="match"/> selects, a batch at a time, and reports the
+    /// total.
+    /// </summary>
+    /// <remarks>
+    /// Batched for the reason the prune is, and for one more that is fatal rather than merely slow:
+    /// the ids reach the DELETE through <c>Contains</c>, which some providers translate to one
+    /// parameter per id. Unbatched, erasing a long trail does not run slowly, it throws — and
+    /// erasure is the path a subject-access deletion request takes, so failing on a trail that is
+    /// merely large is the worst place for it.
+    /// <para>
+    /// A cancelled erasure throws, having deleted whole batches. It is not rolled back — that would
+    /// mean holding a transaction across the sweep, which is what batching exists to avoid — and
+    /// the work is idempotent, so running it again erases what is left.
+    /// </para>
+    /// </remarks>
+    private async Task<int> EraseAsync(Expression<Func<AuditEntry, bool>> match, CancellationToken ct)
+    {
+        var total = 0;
+
+        while (true)
+        {
+            // Oldest first and bounded, exactly as the prune selects its batch. Both erasure
+            // filters lead an index that ends on OccurredAt, so the ordering is served by the
+            // index rather than sorted.
+            var ids = await Entries.AsNoTracking()
+                .Where(match)
+                .OrderBy(e => e.OccurredAt)
+                .Select(e => e.Id)
+                .Take(EraseBatchSize)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            if (ids.Count == 0)
+                return total;
+
+            total += await DeleteByIdAsync(ids, ct).ConfigureAwait(false);
+
+            // Short of a full batch is the store saying that was the last of them, so the next
+            // read would come back empty.
+            if (ids.Count < EraseBatchSize)
+                return total;
+        }
     }
 
     /// <summary>
@@ -198,6 +243,21 @@ public sealed class EfCoreAuditStore(DbContext context) : IAuditStore
         // Exclusive, so consecutive windows do not double-count.
         if (query.To is { } to)
             entries = entries.Where(e => e.OccurredAt < to);
+
+        if (query.After is { } cursor)
+        {
+            // Everything strictly after the cursor in this store's own ordering — newest first, so
+            // "after" is older, and at the same instant a smaller id. Locals rather than the
+            // struct's members so both arrive as parameters.
+            var at = cursor.OccurredAt;
+            var id = cursor.Id;
+
+            // CompareTo rather than an operator: Guid gained one in .NET 9 and this package also
+            // targets net8.0. Both EF 8 and EF 10 translate it, to the column comparison the
+            // ORDER BY uses — which is what makes the two agree about where a page ends.
+            entries = entries.Where(e =>
+                e.OccurredAt < at || (e.OccurredAt == at && e.Id.CompareTo(id) < 0));
+        }
 
         return entries;
     }

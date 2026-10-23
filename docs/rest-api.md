@@ -23,7 +23,7 @@ every entry's actor is honestly unknown.
 | `GET` | `/api/audit/entities` | The declared entities. No entries |
 | `GET` | `/api/audit/entities/{entityName}` | One entity's properties and their rules. No entries |
 | `DELETE` | `/api/audit/entity/{entityName}/{entityId}` | Erase one entity's trail. **Opt-in** |
-| `DELETE` | `/api/audit/actor/{actor}` | Erase one actor's entries. **Opt-in** |
+| `DELETE` | `/api/audit/actor?actor=…` | Erase one actor's entries. **Opt-in** |
 | `POST` | `/api/audit/prune` | Apply retention. **Opt-in** |
 
 Mount them anywhere with `app.MapAuditEndpoints("/admin/audit")`. The call returns the
@@ -47,7 +47,7 @@ app.MapAuditEndpoints(o => o.Policy = "AuditReader");         // or under a poli
 **The destructive endpoints do not exist** unless asked for — not merely secured, absent. Erasure is
 the one irreversible thing the library does, it exists for subject-access deletion requests rather
 than routine use, and a verb that deletes a trail is not something to publish because a library
-happened to offer it. Most applications should schedule `IAuditPruner` instead of exposing it.
+happened to offer it. Most applications should schedule `IAuditManager.PruneAsync` instead of exposing it.
 
 ```csharp
 app.MapAuditEndpoints(o =>
@@ -72,7 +72,20 @@ GET /api/audit?entityName=Product&entityId=42&take=50
 GET /api/audit?actor=alice@example.com&from=2026-10-01T00:00:00Z&includeTotal=true
 GET /api/audit?action=Deleted&actorMissing=true
 GET /api/audit?correlationId=00-7c1f…-01          # the other halves of one edit
+GET /api/audit?take=50&after=MjAyNi0xMC0x…         # the page after the last one read
 ```
+
+**Walk a trail with `after`, not `skip`.** An offset makes the database read and discard everything
+before the page, so page 4,000 costs 200,000 rows to serve — on the one table in the application
+that only grows. It is also unstable: an entry arriving between two requests shifts every later row
+by one, so a client sees a row twice and misses another. An insert cannot move a row across a
+boundary defined by the rows themselves, and the page does not get dearer with depth: measured at
+depth 500,000 of a million-entry trail, 0.1ms by cursor against 36ms by offset. On SQL Server the
+stability holds but the flat cost does not — see
+[limitations.md](limitations.md#deep-paging-on-sql-server-is-not-constant-cost).
+
+`skip` is still there and still right for a UI with numbered pages, which genuinely needs to jump to
+page 7 and is never deep — the dashboard in `clients/dashboard` uses it for exactly that.
 
 | Parameter | |
 |---|---|
@@ -83,6 +96,7 @@ GET /api/audit?correlationId=00-7c1f…-01          # the other halves of one ed
 | `correlationId` | The other entries of the same edit |
 | `from`, `to` | UTC. `from` is inclusive, `to` is **exclusive**, so consecutive windows do not double-count |
 | `skip`, `take` | `take` is clamped to `maxPageSize` (which `GET /api/audit/entities` publishes); omitting it gives the configured default, never everything |
+| `after` | The `nextCursor` from a previous page — **prefer this to `skip` for walking a trail.** A token this API issued; anything else is a `400`. Sending `after` and a non-zero `skip` together is a `400` too |
 | `includeTotal` | Count the matches as well. Off by default: it is a second pass over the index |
 | `includeChanges` | On by default. Turn it off for a wide window, where property rows outnumber entries |
 
@@ -107,7 +121,8 @@ The response reports the page it actually served:
   ],
   "total": null,
   "skip": 0,
-  "take": 1
+  "take": 1,
+  "nextCursor": "MjAyNi0xMC0xN1QwOTozMDowMC4wMDAwMDAwWnw3ZDFiLi4u"
 }
 ```
 
@@ -116,6 +131,10 @@ The response reports the page it actually served:
 - `total` is `null` when no count was asked for. **`null` means not counted, never zero** — a client
   must not paginate against it.
 - `take` is the size served, after clamping. A client that asked for more finds out here.
+- `nextCursor` is where this page ended. Send it as `?after=` for the next one. **It is not a
+  promise that more exist** — the last full page carries one and the request after it comes back
+  empty, with `nextCursor` null. Knowing in advance would mean reading a row past every page to
+  answer a question most callers never ask.
 - `isRedacted` means the two nulls are "not disclosed" rather than "was empty". Say so in the UI
   rather than rendering a blank — and the values are not in the response at all, which a test
   asserts against the whole body rather than the parsed shape.
@@ -222,3 +241,16 @@ caller's fault would hide a fault the operator needs to see as a `500`.
 
 An erasure of a trail that is not there is `200` with `"deleted": 0`. An entity with no trail and
 one that never existed are the same observation, and "nothing to erase" is a successful erasure.
+
+An erasure of a **large** trail is batched inside the store and complete when the `200` arrives —
+there is no page size to pass and no second call to make. The one thing to know: if the client
+disconnects partway, the request's cancellation token fires and the erasure stops having already
+deleted whole batches. Nothing is rolled back, because holding a transaction across the sweep is
+what batching exists to avoid, and the work is idempotent — so the remedy is to call it again
+rather than to assume either outcome. Deletion is the one irreversible thing here, so it is worth
+reading `"deleted"` rather than only the status code.
+
+`POST /prune` takes a `batchSize` and honours it whatever its size: the store groups its own
+statements to stay inside the engine's limits rather than quietly lowering the batch, because a
+lowered batch would read to the pruner as "nothing left to delete" and leave entries past their
+retention. Pick it for how long you are willing to hold locks, not to work around a ceiling.

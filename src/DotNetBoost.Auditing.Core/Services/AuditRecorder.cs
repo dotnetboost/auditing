@@ -7,7 +7,8 @@ using System.Globalization;
 namespace DotNetBoost.Auditing.Core.Services;
 
 /// <summary>
-/// The engine behind <see cref="IAuditRecorder"/>: it decides whether a change is recorded, applies
+/// The recording half of <see cref="Interfaces.IAuditManager"/>: it decides whether a change is
+/// recorded, applies
 /// the model's ignore and redaction rules, formats the values, stamps the actor, correlation and
 /// time, and hands the entry to the store.
 /// <para>
@@ -22,7 +23,9 @@ internal sealed class AuditRecorder(
     IEntityKeyAccessor keys,
     AuditModelRegistry registry,
     AuditingOptions options,
-    TimeProvider timeProvider) : IAuditRecorder
+    TimeProvider timeProvider,
+    IAuditObserver observer,
+    AuditMetrics metrics)
 {
     private readonly IAuditStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IAuditActorAccessor _actors = actors ?? throw new ArgumentNullException(nameof(actors));
@@ -30,39 +33,80 @@ internal sealed class AuditRecorder(
     private readonly AuditModelRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
     private readonly AuditingOptions _options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly TimeProvider _time = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+    private readonly IAuditObserver _observer = observer ?? throw new ArgumentNullException(nameof(observer));
+    private readonly AuditMetrics _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
 
-    /// <inheritdoc/>
-    public AuditSubject For(object entity)
-    {
-        var (name, id) = AuditAddress.Of(entity, _keys);
+    /// <summary>
+    /// <paramref name="entity"/>'s stored name and key. The manager turns this into an
+    /// <see cref="AuditSubject"/> bound to itself; the engine cannot, because a subject records
+    /// through the public interface and this class is not it.
+    /// </summary>
+    internal (string Name, string Id) Address(object entity) => AuditAddress.Of(entity, _keys);
 
-        // The type travels with the subject. Resolving the address and then dropping the type would
-        // cost every write through this subject its [AuditIgnore] and [AuditRedact] rules, silently.
-        return new AuditSubject(this, name, id, entity.GetType());
-    }
+    /// <summary>
+    /// Whether <paramref name="entityType"/> is audited at all, by its attributes and the current
+    /// options.
+    /// </summary>
+    /// <remarks>
+    /// A pure question, and deliberately silent: the discovery endpoint asks it of every declared
+    /// entity on every request, so reporting from here would describe an HTTP read as a suppressed
+    /// write. A capture source that is about to skip an entity wants
+    /// <see cref="SuppressionFor(Type)"/> instead, which gives the reason to report.
+    /// </remarks>
+    internal bool IsAudited(Type entityType) => SuppressionFor(entityType) is null;
 
-    /// <inheritdoc/>
-    public AuditSubject For(string entityName, string entityId) => new(this, entityName, entityId);
-
-    /// <inheritdoc/>
-    public bool IsAudited(Type entityType)
+    /// <summary>
+    /// Why <paramref name="entityType"/> is not audited, or <c>null</c> when it is.
+    /// </summary>
+    /// <remarks>
+    /// The same three rules <see cref="RecordAsync"/> applies, in one place so a capture source
+    /// that skips an entity early and the engine that would have skipped it late cannot disagree
+    /// about why. Reporting is the caller's, because only the caller knows whether it is about to
+    /// skip the entity or merely asking about it.
+    /// </remarks>
+    internal AuditSuppression? SuppressionFor(Type entityType)
     {
         ArgumentNullException.ThrowIfNull(entityType);
 
         if (!_options.Enabled)
-            return false;
+            return AuditSuppression.RecordingDisabled;
 
         var plan = AuditPlan.For(entityType);
-        return !plan.Ignored && (!_options.RequireOptIn || plan.OptedIn);
+
+        if (plan.Ignored)
+            return AuditSuppression.EntityIgnored;
+
+        if (_options.RequireOptIn && !plan.OptedIn)
+            return AuditSuppression.NotOptedIn;
+
+        return null;
     }
 
-    /// <inheritdoc/>
-    public async Task<AuditEntry?> RecordAsync(AuditWrite write, CancellationToken ct = default)
+    /// <summary>
+    /// Reports a suppression the caller is acting on — to the observer and to the counter. The seam
+    /// a capture source uses, so that neither is reached separately by every source and a new source
+    /// cannot report one of the two and forget the other.
+    /// </summary>
+    internal void ReportSuppressed(
+        AuditSuppression reason,
+        string entityName,
+        string entityId,
+        AuditAction action)
+    {
+        _observer.WriteSuppressed(reason, entityName, entityId, action);
+        _metrics.Suppressed(reason, entityName, action);
+    }
+
+    /// <summary>Records one change, applying the model's rules and the engine's formatting.</summary>
+    internal async Task<AuditEntry?> RecordAsync(AuditWrite write, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(write);
 
+        // Reported before the addressing is validated, because the kill switch is the one
+        // suppression that does not depend on which entity this is — and an over-long name should
+        // still throw rather than be swallowed by a disabled engine.
         if (!_options.Enabled)
-            return null;
+            return Suppressed(AuditSuppression.RecordingDisabled, write.EntityName, write.EntityId, write.Action);
 
         var entityName = Require(write.EntityName, nameof(write.EntityName), AuditEntityNames.MaxLength);
         var entityId   = Require(write.EntityId, nameof(write.EntityId), EntityKey.MaxLength);
@@ -74,17 +118,25 @@ internal sealed class AuditRecorder(
         if (plan is not null)
         {
             if (plan.Ignored)
-                return null;
+                return Suppressed(AuditSuppression.EntityIgnored, entityName, entityId, write.Action);
 
             if (_options.RequireOptIn && !plan.OptedIn)
-                return null;
+                return Suppressed(AuditSuppression.NotOptedIn, entityName, entityId, write.Action);
         }
         else if (_options.RequireOptIn)
         {
             // Opt-in is an allow-list, and an entity nothing can be proven about is not on it.
             // Recording it anyway would make RequireOptIn mean "allow-list, except by the back
             // door", which is not a setting anyone would choose.
-            return null;
+            return Suppressed(AuditSuppression.EntityNotDeclared, entityName, entityId, write.Action);
+        }
+        else if (write.EntityType is null)
+        {
+            // Recorded, but with no [AuditIgnore] or [AuditRedact] to apply — so a redacted
+            // property of this entity has just been written in full. Reported rather than inferred:
+            // with nothing declared there are no attributes to read, so the engine cannot tell
+            // whether this entity has one. See IAuditObserver.RecordedWithoutModelRules.
+            _observer.RecordedWithoutModelRules(entityName, entityId, write.Action);
         }
 
         var changes = Project(write, plan);
@@ -94,7 +146,7 @@ internal sealed class AuditRecorder(
         // because an entity whose only changing property is [AuditIgnore] would otherwise produce an
         // endless trail of entries that say a change happened and never which.
         if (write.Action == AuditAction.Updated && changes.Count == 0)
-            return null;
+            return Suppressed(AuditSuppression.NothingChanged, entityName, entityId, write.Action);
 
         var entry = new AuditEntry
         {
@@ -115,7 +167,31 @@ internal sealed class AuditRecorder(
         }
 
         await _store.AppendAsync(entry, ct).ConfigureAwait(false);
+
+        // Counted here, which is "handed to the store" and not "committed" — the EF Core store only
+        // tracks an entry, and the caller's SaveChanges is what makes it durable. See
+        // AuditingTelemetry.EntriesRecorded.
+        _metrics.Recorded(entityName, write.Action);
+
         return entry;
+    }
+
+    /// <summary>
+    /// Tells the observer, then returns the <c>null</c> that means "deliberately not recorded".
+    /// </summary>
+    /// <remarks>
+    /// One helper rather than a report beside each <c>return null</c>, so that a suppression added
+    /// later cannot return <c>null</c> without saying why — which is the failure this whole
+    /// interface exists to prevent, and it would be a quiet one.
+    /// </remarks>
+    private AuditEntry? Suppressed(
+        AuditSuppression reason,
+        string entityName,
+        string entityId,
+        AuditAction action)
+    {
+        ReportSuppressed(reason, entityName, entityId, action);
+        return null;
     }
 
     /// <summary>
@@ -231,16 +307,27 @@ internal sealed class AuditRecorder(
             : id[..AuditColumns.CorrelationIdMaxLength];
     }
 
+    /// <summary>
+    /// <paramref name="value"/> if it is present and fits, else the exception that says which field
+    /// was wrong.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="field"/> is the <c>paramName</c>, not <c>nameof(value)</c>: the field is what
+    /// the caller passed and <c>value</c> is only what this method happens to call it. The
+    /// difference reaches a client — <c>AuditProblemFilter</c> puts <c>paramName</c> in the problem
+    /// response, so the 400 for an over-long key said <c>"parameter": "value"</c> instead of naming
+    /// <c>EntityId</c>.
+    /// </remarks>
     private static string Require(string value, string field, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
-            throw new ArgumentException($"{field} is required.", nameof(value));
+            throw new ArgumentException($"{field} is required.", field);
 
         if (value.Length > maxLength)
         {
             throw new ArgumentException(
                 $"{field} is {value.Length.ToString(CultureInfo.InvariantCulture)} characters; the column " +
-                $"holds {maxLength.ToString(CultureInfo.InvariantCulture)}.", nameof(value));
+                $"holds {maxLength.ToString(CultureInfo.InvariantCulture)}.", field);
         }
 
         return value;

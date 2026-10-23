@@ -117,6 +117,18 @@ namespace DotNetBoost.Auditing.API
         int Skip,
         int Take)
     {
+        /// <summary>
+        /// The token to send as <c>?after=</c> for the next page, or <c>null</c> when this page is
+        /// empty and the walk is over.
+        /// <para>
+        /// <b>Not a promise that more exist</b> — it is where this page ended. The last full page
+        /// carries one, and the request after it comes back empty. Prefer it to <c>skip</c> for
+        /// walking a trail: it does not get dearer with depth, and an entry arriving between two
+        /// requests cannot shift a row across a page boundary and make a client see it twice.
+        /// </para>
+        /// </summary>
+        public string? NextCursor { get; init; }
+
         /// <summary>Maps a page to its wire shape.</summary>
         /// <param name="page">The page.</param>
         /// <param name="skip">The offset served.</param>
@@ -130,7 +142,10 @@ namespace DotNetBoost.Auditing.API
                 [.. page.Entries.Select(AuditEntryResponse.From)],
                 page.Total,
                 skip,
-                page.Entries.Count);
+                page.Entries.Count)
+            {
+                NextCursor = page.NextCursor?.ToString()
+            };
         }
     }
 
@@ -191,7 +206,7 @@ namespace DotNetBoost.Auditing.API
         /// <summary>
         /// Whether to map <c>POST {prefix}/prune</c>. <b>Default <c>false</c></b>, for the same
         /// reason as <see cref="MapErasure"/>: a prune deletes history, and most applications should
-        /// schedule <see cref="IAuditPruner"/> rather than expose it.
+        /// schedule <see cref="IAuditManager.PruneAsync(int, CancellationToken)"/> rather than expose it.
         /// </summary>
         public bool MapPrune { get; set; }
 
@@ -237,18 +252,24 @@ namespace DotNetBoost.Auditing.API
         /// app.MapAuditEndpoints(o =&gt; o.Policy = "AuditReader");     // reads, under a policy
         /// </code>
         /// <list type="bullet">
-        /// <item><description><c>GET {prefix}</c> — a filtered, paged page of the trail, newest first.</description></item>
+        /// <item><description><c>GET {prefix}</c> — a filtered, paged page of the trail, newest first. Page with <c>?after=</c>.</description></item>
         /// <item><description><c>GET {prefix}/{id}</c> — one entry with its property changes.</description></item>
         /// <item><description><c>GET {prefix}/entities</c> — the declared entities. No entries.</description></item>
         /// <item><description><c>GET {prefix}/entities/{entityName}</c> — one entity's properties and their rules.</description></item>
         /// <item><description><c>DELETE {prefix}/entity/{entityName}/{entityId}</c> — erase one entity's trail. Opt-in.</description></item>
-        /// <item><description><c>DELETE {prefix}/actor/{actor}</c> — erase one actor's entries. Opt-in.</description></item>
+        /// <item><description><c>DELETE {prefix}/actor?actor=…</c> — erase one actor's entries. Opt-in.</description></item>
         /// <item><description><c>POST {prefix}/prune</c> — apply retention. Opt-in.</description></item>
         /// </list>
         /// <para>
         /// Every read is bounded by the engine: <c>take</c> is clamped to the configured maximum and
         /// an omitted <c>take</c> is the configured default, never "all of them". The page reports
         /// the size it actually served.
+        /// <para>
+        /// Walk a trail with <c>?after=</c> and the <c>nextCursor</c> each page returns, rather than
+        /// with <c>?skip=</c>: an offset makes the database read and discard everything before the
+        /// page, and shifts under a client while entries are arriving. Sending both is a
+        /// <c>400</c>.
+        /// </para>
         /// </para>
         /// </summary>
         /// <param name="endpoints">The route builder.</param>
@@ -312,7 +333,7 @@ namespace DotNetBoost.Auditing.API
                     .WithSummary("Erases one entity's entire trail. Irreversible.")
                     .ProducesProblem(StatusCodes.Status400BadRequest);
 
-                erasure.MapDelete("/actor/{actor}", EraseActorAsync)
+                erasure.MapDelete("/actor", EraseActorAsync)
                     .WithSummary("Erases every entry recorded against one actor. Irreversible.")
                     .ProducesProblem(StatusCodes.Status400BadRequest);
             }
@@ -352,16 +373,16 @@ namespace DotNetBoost.Auditing.API
 
             var byName = declared.ToDictionary(e => e.Name, StringComparer.Ordinal);
 
-            group.MapGet("/entities", (IAuditRecorder recorder, AuditingOptions options) =>
+            group.MapGet("/entities", (IAuditManager audit, AuditingOptions options) =>
                 TypedResults.Ok(new AuditEntitiesResponse(
                     MaxPageSize: options.MaxPageSize,
-                    Entities:    [.. declared.Select(e => e.Describe(recorder, options))])))
+                    Entities:    [.. declared.Select(e => e.Describe(audit, options))])))
                 .WithName("ListAuditEntities")
                 .WithSummary("The declared entities and the page bound. Returns nothing recorded.")
                 .Produces<AuditEntitiesResponse>();
 
             group.MapGet("/entities/{entityName}", Results<Ok<AuditEntitySchema>, NotFound> (
-                IAuditRecorder recorder,
+                IAuditManager audit,
                 AuditingOptions options,
                 string entityName) =>
             {
@@ -379,7 +400,7 @@ namespace DotNetBoost.Auditing.API
                         Rule:     p.Rule.ToString()))
                     .ToList();
 
-                var described = entity.Describe(recorder, options);
+                var described = entity.Describe(audit, options);
 
                 return TypedResults.Ok(new AuditEntitySchema(
                     Name:            described.Name,
@@ -415,15 +436,15 @@ namespace DotNetBoost.Auditing.API
             /// <summary>
             /// The entity as it stands now.
             /// <para>
-            /// <c>Audited</c> is asked of <see cref="IAuditRecorder"/> rather than worked out from
-            /// the attributes here, so that one definition of "audited" serves both the recorder
+            /// <c>Audited</c> is asked of <see cref="IAuditManager"/> rather than worked out from
+            /// the attributes here, so that one definition of "audited" serves both the audit
             /// and anything reading this endpoint.
             /// </para>
             /// </summary>
-            public AuditEntityDescriptor Describe(IAuditRecorder recorder, AuditingOptions options) =>
+            public AuditEntityDescriptor Describe(IAuditManager audit, AuditingOptions options) =>
                 new(Name:            Name,
                     ClrType:         Type.Name,
-                    Audited:         recorder.IsAudited(Type),
+                    Audited:         audit.IsAudited(Type),
                     OptedIn:         OptedIn,
                     Ignored:         Ignored,
                     RetentionDays:   (OwnRetention ?? options.Retention)?.TotalDays,
@@ -449,7 +470,7 @@ namespace DotNetBoost.Auditing.API
         /// object so that each one is named in the OpenAPI document.
         /// </summary>
         private static async Task<Ok<AuditPageResponse>> QueryAsync(
-            IAuditReader reader,
+            IAuditManager audit,
             string? entityName,
             string? entityId,
             AuditAction? action,
@@ -460,10 +481,29 @@ namespace DotNetBoost.Auditing.API
             DateTime? to,
             int? skip,
             int? take,
+            string? after,
             bool? includeTotal,
             bool? includeChanges,
             CancellationToken ct)
         {
+            AuditCursor? cursor = null;
+
+            if (Trimmed(after) is { } token)
+            {
+                // Refused rather than ignored. A cursor that silently fell back to the first page
+                // would restart a walk from the top, and a client paging a long trail would loop
+                // over the newest page for ever without an error to explain it.
+                if (!AuditCursor.TryParse(token, out var parsed))
+                {
+                    throw new ArgumentException(
+                        "The 'after' cursor is not one this API issued. Send back the 'nextCursor' from a " +
+                        "previous page rather than composing one, or omit it to start at the newest entry.",
+                        nameof(after));
+                }
+
+                cursor = parsed;
+            }
+
             var query = new AuditQuery
             {
                 EntityName     = Trimmed(entityName),
@@ -475,24 +515,25 @@ namespace DotNetBoost.Auditing.API
                 From           = from,
                 To             = to,
                 Skip           = skip ?? 0,
-                // Zero means "the configured default", which the reader applies. Passing it through
+                After          = cursor,
+                // Zero means "the configured default", which the audit applies. Passing it through
                 // rather than inventing one here keeps one definition of the page size.
                 Take           = take ?? 0,
                 IncludeTotal   = includeTotal ?? false,
                 IncludeChanges = includeChanges ?? true
             };
 
-            var page = await reader.QueryAsync(query, ct).ConfigureAwait(false);
+            var page = await audit.QueryAsync(query, ct).ConfigureAwait(false);
             return TypedResults.Ok(AuditPageResponse.From(page, query.Skip < 0 ? 0 : query.Skip));
         }
 
         /// <summary><c>GET {prefix}/{id}</c>.</summary>
         private static async Task<Results<Ok<AuditEntryResponse>, NotFound>> GetAsync(
-            IAuditReader reader,
+            IAuditManager audit,
             Guid id,
             CancellationToken ct)
         {
-            var entry = await reader.GetAsync(id, ct).ConfigureAwait(false);
+            var entry = await audit.GetAsync(id, ct).ConfigureAwait(false);
 
             return entry is null
                 ? TypedResults.NotFound()
@@ -501,12 +542,12 @@ namespace DotNetBoost.Auditing.API
 
         /// <summary><c>DELETE {prefix}/entity/{entityName}/{entityId}</c>.</summary>
         private static async Task<Ok<DeletionResponse>> EraseEntityAsync(
-            IAuditPruner pruner,
+            IAuditManager audit,
             string entityName,
             string entityId,
             CancellationToken ct)
         {
-            var deleted = await pruner.EraseForAsync(entityName, entityId, ct).ConfigureAwait(false);
+            var deleted = await audit.EraseForAsync(entityName, entityId, ct).ConfigureAwait(false);
 
             // 200 with a count of zero rather than 404: an entity with no trail and an entity that
             // never existed are the same observation here, and "nothing to erase" is a successful
@@ -514,19 +555,38 @@ namespace DotNetBoost.Auditing.API
             return TypedResults.Ok(new DeletionResponse(deleted));
         }
 
-        /// <summary><c>DELETE {prefix}/actor/{actor}</c>.</summary>
+        /// <summary>
+        /// <c>DELETE {prefix}/actor?actor=…</c> — the actor in the query string rather than in the
+        /// path.
+        /// </summary>
+        /// <remarks>
+        /// An actor is an opaque identifier the application chose, not a path segment: a subject
+        /// claim can be a URI, a Windows account carries a backslash, and either can hold a
+        /// character a path cannot. A query parameter encodes all of them.
+        /// <para>
+        /// A catch-all route would have handled slashes too, and was rejected for a different
+        /// reason: it swallows trailing segments, so <c>/actor/alice/oops</c> would erase for the
+        /// actor <c>"alice/oops"</c> and answer <c>200</c> with <c>"deleted": 0</c> — a typo
+        /// indistinguishable from a correct request for someone with no trail, on the one endpoint
+        /// where nothing can be undone.
+        /// </para>
+        /// </remarks>
         private static async Task<Ok<DeletionResponse>> EraseActorAsync(
-            IAuditPruner pruner,
-            string actor,
+            IAuditManager audit,
+            string? actor,
             CancellationToken ct)
         {
-            var deleted = await pruner.EraseForActorAsync(actor, ct).ConfigureAwait(false);
+            // Missing or blank is the client's mistake, and says so as a 400 rather than erasing
+            // something. AuditProblemFilter maps it; the engine would refuse it anyway.
+            ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+
+            var deleted = await audit.EraseForActorAsync(actor, ct).ConfigureAwait(false);
             return TypedResults.Ok(new DeletionResponse(deleted));
         }
 
         /// <summary><c>POST {prefix}/prune</c>.</summary>
         private static async Task<Ok<DeletionResponse>> PruneAsync(
-            IAuditPruner pruner,
+            IAuditManager audit,
             PruneRequest? request,
             CancellationToken ct)
         {
@@ -534,10 +594,10 @@ namespace DotNetBoost.Auditing.API
             var batchSize = body.BatchSize;
 
             var deleted = body.OlderThanDays is { } days
-                ? await pruner
+                ? await audit
                     .PruneOlderThanAsync(TimeSpan.FromDays(days), Trimmed(body.EntityName), batchSize, ct)
                     .ConfigureAwait(false)
-                : await pruner.PruneAsync(batchSize, ct).ConfigureAwait(false);
+                : await audit.PruneAsync(batchSize, ct).ConfigureAwait(false);
 
             return TypedResults.Ok(new DeletionResponse(deleted));
         }

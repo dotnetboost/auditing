@@ -223,6 +223,99 @@ public abstract class StoreConformance : IAsyncLifetime
         await AppendAsync(Entry("9", entityName: "Order", actor: "alice", correlationId: "c4", occurredAt: Base.AddHours(3)), Change());
     }
 
+    // ── paging by cursor ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task A_cursor_reads_the_page_after_the_one_it_points_at()
+    {
+        await SeedAsync();
+
+        var first = await Store.QueryAsync(new AuditQuery { Take = 2 });
+        Assert.Equal(2, first.Entries.Count);
+
+        var second = await Store.QueryAsync(new AuditQuery
+        {
+            Take  = 2,
+            After = AuditCursor.Of(first.Entries[^1])
+        });
+
+        Assert.Equal(2, second.Entries.Count);
+
+        // No overlap and no gap: four entries seen exactly once across the two pages.
+        var seen = first.Entries.Concat(second.Entries).Select(e => e.Id).ToList();
+        Assert.Equal(4, seen.Distinct().Count());
+
+        // And the walk ends rather than repeating the last page for ever.
+        var third = await Store.QueryAsync(new AuditQuery
+        {
+            Take  = 2,
+            After = AuditCursor.Of(second.Entries[^1])
+        });
+
+        Assert.Empty(third.Entries);
+    }
+
+    [Fact]
+    public async Task A_cursor_steps_through_entries_that_share_a_timestamp()
+    {
+        // All four at the same instant, so only the id tiebreaker separates them. This is the case
+        // a timestamp-only cursor gets wrong — it would return the whole group again, or skip it.
+        for (var i = 0; i < 4; i++)
+            await AppendAsync(Entry(i.ToString(CultureInfo.InvariantCulture), occurredAt: Base), Change());
+
+        var seen   = new List<Guid>();
+        AuditCursor? cursor = null;
+
+        for (var page = 0; page < 5; page++)
+        {
+            var read = await Store.QueryAsync(new AuditQuery { Take = 1, After = cursor });
+
+            if (read.Entries.Count == 0)
+                break;
+
+            seen.Add(read.Entries[0].Id);
+            cursor = AuditCursor.Of(read.Entries[^1]);
+        }
+
+        // Each one once. The order within the group is the engine's own id ordering, which differs
+        // between engines, so what is asserted is the set rather than the sequence.
+        Assert.Equal(4, seen.Count);
+        Assert.Equal(4, seen.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task A_cursor_combines_with_the_filters()
+    {
+        await SeedAsync();
+
+        var query = new AuditQuery { EntityName = "Product", Take = 1 };
+
+        var first = await Store.QueryAsync(query);
+        Assert.Equal("Product", Assert.Single(first.Entries).EntityName);
+
+        var rest = await Store.QueryAsync(query with { After = AuditCursor.Of(first.Entries[^1]), Take = 10 });
+
+        // The filter still applies past the cursor: two Products left and never the Order, which
+        // sorts between them by timestamp.
+        Assert.Equal(2, rest.Entries.Count);
+        Assert.All(rest.Entries, e => Assert.Equal("Product", e.EntityName));
+    }
+
+    [Fact]
+    public async Task A_cursor_past_the_end_reads_nothing()
+    {
+        await SeedAsync();
+
+        var page = await Store.QueryAsync(new AuditQuery
+        {
+            Take  = 10,
+            // Older than anything seeded, and the lowest possible id, so nothing sorts after it.
+            After = new AuditCursor(Base.AddYears(-1), Guid.Empty)
+        });
+
+        Assert.Empty(page.Entries);
+    }
+
     [Fact]
     public async Task A_query_filters_by_entity_name_and_key()
     {
@@ -440,6 +533,37 @@ public abstract class StoreConformance : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_batch_too_large_for_one_statement_is_still_one_batch()
+    {
+        // Past SQL Server's 2,100-parameter ceiling, which a store that deletes by a list of ids
+        // runs into. A batch size is the caller's to choose, so what is asserted here is that the
+        // whole of it goes in this one call and is reported: returning less would tell the pruner
+        // the backlog was clear and leave entries sitting past their retention.
+        const int count = 2_500;
+
+        var entries = new List<AuditEntry>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var entry = Entry(entityId: i.ToString(CultureInfo.InvariantCulture), occurredAt: Base);
+
+            var change = Change();
+            change.AuditEntryId = entry.Id;
+            entry.Changes.Add(change);
+
+            entries.Add(entry);
+        }
+
+        await Store.AppendRangeAsync(entries);
+        await FlushAsync();
+
+        Assert.Equal(count, await Store.DeleteOlderThanAsync(Base.AddHours(1), AuditPruneScope.All, count));
+
+        Assert.Empty((await Store.QueryAsync(new AuditQuery { Take = 10 })).Entries);
+        Assert.Equal(0, await CountChangesAsync());
+    }
+
+    [Fact]
     public async Task Erasing_one_entity_leaves_the_others()
     {
         await SeedAsync();
@@ -461,6 +585,44 @@ public abstract class StoreConformance : IAsyncLifetime
         var left = await Store.QueryAsync(new AuditQuery { Take = 10 });
         Assert.Equal(2, left.Entries.Count);
         Assert.DoesNotContain(left.Entries, e => e.Actor == "alice");
+    }
+
+    [Fact]
+    public async Task Erasing_a_trail_larger_than_one_batch_removes_all_of_it()
+    {
+        // Past the point where a store that deletes by a list of ids has to go round more than
+        // once, and past SQL Server's 2,100-parameter ceiling — which is what an unbatched erasure
+        // used to hit, as a throw rather than a slow delete. Erasure takes no batch size, so
+        // "however many there are" is the contract being asserted here.
+        const int count = 2_500;
+
+        var entries = new List<AuditEntry>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var entry = Entry(
+                entityId: i.ToString(CultureInfo.InvariantCulture),
+                actor: "leaver@example.com",
+                correlationId: "bulk",
+                occurredAt: Base.AddSeconds(i));
+
+            var change = Change();
+            change.AuditEntryId = entry.Id;
+            entry.Changes.Add(change);
+
+            entries.Add(entry);
+        }
+
+        await Store.AppendRangeAsync(entries);
+        await FlushAsync();
+
+        Assert.Equal(count, await Store.DeleteForActorAsync("leaver@example.com"));
+
+        Assert.Empty((await Store.QueryAsync(new AuditQuery { Take = 10 })).Entries);
+
+        // And the property rows went with them. An orphan at this scale is the same bug as an
+        // orphan at three, but it is only reachable once the delete has to loop.
+        Assert.Equal(0, await CountChangesAsync());
     }
 
     [Fact]

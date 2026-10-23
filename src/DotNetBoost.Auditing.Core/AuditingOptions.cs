@@ -14,9 +14,15 @@ public sealed class AuditingOptions
     private TimeSpan? _retention;
 
     /// <summary>
-    /// Whether anything is recorded at all. A kill switch for an incident, flippable from
-    /// configuration without removing the registration — the recorder stays resolvable and returns
-    /// <c>null</c> from every call.
+    /// Whether anything is recorded at all. A kill switch for an incident, which stops recording
+    /// without removing the registration — the engine stays resolvable and returns <c>null</c> from
+    /// every call, reporting <see cref="Models.AuditSuppression.RecordingDisabled"/> as it does.
+    /// <para>
+    /// <b>Settable at startup, not at runtime.</b> Read it from configuration if you like —
+    /// <c>AddAuditing(o =&gt; o.Enabled = config.GetValue&lt;bool&gt;("Auditing:Enabled"))</c> — but
+    /// there is no <c>IOptionsMonitor</c> behind it, so a change takes a restart. It is the switch
+    /// you set while deploying a fix, not one you flip to stop a trail mid-incident.
+    /// </para>
     /// <para>
     /// Reads are unaffected: turning recording off must not hide the trail already collected.
     /// </para>
@@ -123,7 +129,8 @@ public sealed class AuditingOptions
     /// How long entries are kept, for entities with no <c>[AuditRetention]</c> of their own.
     /// <c>null</c> (the default) keeps everything.
     /// <para>
-    /// Setting it deletes nothing by itself — <see cref="Interfaces.IAuditPruner"/> does the work,
+    /// Setting it deletes nothing by itself —
+    /// <see cref="Interfaces.IAuditManager.PruneAsync(int, CancellationToken)"/> does the work,
     /// when something runs it. A library that silently deleted history on a timer nobody asked for
     /// would be the wrong kind of helpful.
     /// </para>
