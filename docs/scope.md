@@ -175,7 +175,8 @@ plain text, forever, in a table nobody thinks to look at.
 
 - `[AuditIgnore]` on a property — never recorded, not even its name.
 - `[AuditRedact]` on a property — recorded as changed, both values `null`, `IsRedacted` set.
-- `[AuditIgnore]` on a class — the entity is not audited at all.
+- `[AuditIgnore]` on a class — the entity is not audited at all. `.IgnoreEntity<T>()` at
+  registration is the same rule for a type the application cannot annotate.
 - Redaction follows **the attribute**, never whether the value happened to be encrypted at rest, so
   it holds with no encryptor configured. This is the rule Settings' observer got right.
 - An opt-in **allow-list mode** (`AuditOnly`) for the entities that want it, because the sane

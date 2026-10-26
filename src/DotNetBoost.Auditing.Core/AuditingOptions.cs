@@ -148,6 +148,61 @@ public sealed class AuditingOptions
         }
     }
 
+    private readonly List<Type> _ignoredEntities = [];
+
+    /// <summary>
+    /// The entity types excluded by <c>IgnoreEntity&lt;T&gt;()</c> — a class-level
+    /// <c>[AuditIgnore]</c> for a type the application cannot annotate.
+    /// <para>
+    /// Here rather than in <see cref="AuditPlan"/>, which is a static cache of what a type's
+    /// attributes say: an ignore is configuration, and two hosts reading the same assembly can
+    /// differ about it, exactly as they can about <see cref="RequireOptIn"/>.
+    /// </para>
+    /// </summary>
+    internal IReadOnlyList<Type> IgnoredEntities => _ignoredEntities;
+
+    /// <summary>Adds <paramref name="entityType"/> to <see cref="IgnoredEntities"/>, once.</summary>
+    internal void Ignore(Type entityType)
+    {
+        if (!_ignoredEntities.Contains(entityType))
+            _ignoredEntities.Add(entityType);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="entityType"/> is excluded by <c>IgnoreEntity&lt;T&gt;()</c>. A
+    /// subclass of an ignored type is ignored with it, as it would be by an inherited
+    /// <c>[AuditIgnore]</c> — which is also what keeps an EF Core proxy of an ignored entity out.
+    /// </summary>
+    internal bool IsIgnored(Type entityType)
+    {
+        // A list rather than a set, and a loop rather than a lookup: the subclass rule needs
+        // IsAssignableFrom, and an application ignores one or two types, not hundreds.
+        foreach (var ignored in _ignoredEntities)
+        {
+            if (ignored.IsAssignableFrom(entityType))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the entity stored under <paramref name="entityName"/> is excluded by
+    /// <c>IgnoreEntity&lt;T&gt;()</c>, for a write addressed by name — the case where there is no
+    /// type to ask about. <c>Build()</c> refuses an ignored type whose name a declared entity also
+    /// uses, so the name is unambiguous here.
+    /// </summary>
+    internal bool IsIgnored(string entityName)
+    {
+        foreach (var ignored in _ignoredEntities)
+        {
+            if (string.Equals(AuditEntityNames.For(ignored), entityName, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Validates the combination. Called by <c>Build()</c>; the individual setters have already
     /// rejected their own bad values, so this is only for the pairs that are each valid alone.

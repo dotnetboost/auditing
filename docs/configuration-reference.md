@@ -20,6 +20,8 @@ reads the declared entities and refuses a configuration with no store.
 | `.DeclareEntitiesFrom(assembly)` | Core | Declares every public class in `assembly` carrying `[AuditEntity]`, `[Audited]` or `[AuditRetention]` |
 | `.DeclareEntity<TEntity>()` | Core | Declares one entity, attribute or not |
 | `.DeclareEntities(params Type[])` | Core | Declares several |
+| `.IgnoreEntity<TEntity>()` | Core | Never records `TEntity` — a class-level `[AuditIgnore]` for a type you cannot annotate, such as MultiLingual's `Translation`. Wins over `[Audited]` and `RequireOptIn`. Not `Ignore`, which in EF Core means "do not map" |
+| `.IgnoreEntities(params Type[])` | Core | Ignores several |
 | `.WithRetention(TimeSpan)` | Core | Same as `AddAuditing(o => o.Retention = …)`. Deletes nothing by itself |
 | `.WithPageSize(defaultSize, maxSize)` | Core | Both page sizes at once |
 | `.WithMaxValueLength(characters)` | Core | Override the 4000-character value limit |
@@ -39,7 +41,8 @@ written to one are invisible to the other, and a trail split across two stores i
 
 `Build()` also refuses two combinations the setters cannot catch on their own —
 `DefaultPageSize` above `MaxPageSize`, and `MaxValueLength` above `AuditingOptions.MaxValueCeiling`
-(1 MB of UTF-16) — and two declared entities claiming one stored name.
+(1 MB of UTF-16) — two declared entities claiming one stored name, and an `IgnoreEntity` type that
+is also declared or shares a declared entity's stored name.
 
 ## `AuditingOptions`
 

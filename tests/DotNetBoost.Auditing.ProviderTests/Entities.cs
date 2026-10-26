@@ -60,6 +60,34 @@ public class CompositeKeyed
     public string Label { get; set; } = "";
 }
 
+/// <summary>
+/// The shape of DotNetBoost.MultiLingual's translation row: a type an application shares its context
+/// with and cannot annotate, keyed on four columns. <c>IgnoreEntity&lt;T&gt;()</c> is for this.
+/// </summary>
+public class Translation
+{
+    public string EntityName { get; set; } = "";
+    public string EntityId { get; set; } = "";
+    public string PropertyName { get; set; } = "";
+    public string LanguageCode { get; set; } = "";
+    public string Value { get; set; } = "";
+}
+
+/// <summary>A multi-column key the application does own, and so excludes with the attribute.</summary>
+[AuditIgnore]
+public class IgnoredCompositeKeyed
+{
+    public int TenantId { get; set; }
+    public int LocalId { get; set; }
+    public string Label { get; set; } = "";
+}
+
+/// <summary>A single key longer than <c>EntityKey.MaxLength</c>: addressable by EF, not by an entry.</summary>
+public class LongKeyed
+{
+    public string Code { get; set; } = "";
+}
+
 public class Order
 {
     public int Id { get; set; }

@@ -154,6 +154,162 @@ public class RegistrationTests
             .Build();
     }
 
+    // ── IgnoreEntity ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A scope over an engine built with <paramref name="configure"/>, and the observer it reports
+    /// to — the only place an ignored entity leaves a trace.
+    /// </summary>
+    private static (IServiceScope Scope, IAuditManager Audit, RecordingAuditStore Store, RecordingAuditObserver Observer)
+        Ignoring(Func<AuditingBuilder, AuditingBuilder> configure, Action<AuditingOptions>? options = null)
+    {
+        var store = new RecordingAuditStore();
+
+        var provider = configure(new ServiceCollection()
+                .AddAuditing(o => options?.Invoke(o))
+                .UseCustomStore(_ => store)
+                .UseObserver<RecordingAuditObserver>())
+            .Build()
+            .BuildServiceProvider();
+
+        var scope = provider.CreateScope();
+
+        return (
+            scope,
+            scope.ServiceProvider.GetRequiredService<IAuditManager>(),
+            store,
+            (RecordingAuditObserver)provider.GetRequiredService<IAuditObserver>());
+    }
+
+    [Fact]
+    public async Task An_ignored_entity_is_suppressed_as_ignored_whichever_way_it_is_addressed()
+    {
+        var (scope, audit, store, observer) = Ignoring(b => b.IgnoreEntity<Product>());
+        using var lifetime = scope;
+
+        Assert.False(audit.IsAudited(typeof(Product)));
+
+        Assert.Null(await audit.For(new Product { Id = 1 })
+            .UpdatedAsync([new AuditChange(nameof(Product.Price), 1m, 2m)]));
+
+        // By name too: the ignore names the type, so the engine knows the name as surely as it
+        // would for a declared [AuditIgnore] class — and the two must not differ.
+        Assert.Null(await audit.For("Product", "1").DeletedAsync());
+
+        Assert.Empty(store.Entries);
+        Assert.Equal(
+            [(AuditSuppression.EntityIgnored, "Product", "1", AuditAction.Updated),
+             (AuditSuppression.EntityIgnored, "Product", "1", AuditAction.Deleted)],
+            observer.Suppressed);
+    }
+
+    [Fact]
+    public async Task IgnoreEntity_matches_a_declared_class_level_AuditIgnore()
+    {
+        var (attributeScope, byAttribute, _, attributeObserver) = Ignoring(b => b.DeclareEntity<Heartbeat>());
+        var (configScope, byConfig, _, configObserver) = Ignoring(b => b.IgnoreEntity<Product>());
+        using var a = attributeScope;
+        using var c = configScope;
+
+        await byAttribute.For(new Heartbeat { Id = 1 }).CreatedAsync();
+        await byAttribute.For("Heartbeat", "1").DeletedAsync();
+        await byConfig.For(new Product { Id = 1 }).CreatedAsync();
+        await byConfig.For("Product", "1").DeletedAsync();
+
+        Assert.Equal(attributeObserver.Reasons, configObserver.Reasons);
+        Assert.Equal(byAttribute.IsAudited(typeof(Heartbeat)), byConfig.IsAudited(typeof(Product)));
+    }
+
+    [Fact]
+    public async Task IgnoreEntity_wins_over_Audited_and_over_RequireOptIn()
+    {
+        var (scope, audit, store, observer) = Ignoring(
+            b => b.IgnoreEntities(typeof(Invoice)),
+            o => o.RequireOptIn = true);
+        using var lifetime = scope;
+
+        Assert.False(audit.IsAudited(typeof(Invoice)));
+        Assert.Null(await audit.For(new Invoice { Id = 1 })
+            .UpdatedAsync([new AuditChange(nameof(Invoice.Total), 1m, 2m)]));
+
+        Assert.Empty(store.Entries);
+
+        // Ignored, not NotOptedIn: the entity is [Audited], so "not opted in" would be false.
+        Assert.Equal(AuditSuppression.EntityIgnored, Assert.Single(observer.Suppressed).Reason);
+    }
+
+    [Fact]
+    public async Task Ignoring_one_entity_leaves_the_others_recorded()
+    {
+        var (scope, audit, store, _) = Ignoring(b => b.IgnoreEntity<Product>());
+        using var lifetime = scope;
+
+        Assert.NotNull(await audit.For(new Invoice { Id = 1 })
+            .UpdatedAsync([new AuditChange(nameof(Invoice.Total), 1m, 2m)]));
+
+        Assert.Equal("Invoice", Assert.Single(store.Entries).EntityName);
+    }
+
+    [Fact]
+    public void Ignoring_the_same_type_twice_is_harmless()
+    {
+        new ServiceCollection()
+            .AddAuditing()
+            .UseCustomStore<RecordingAuditStore>()
+            .IgnoreEntity<Product>()
+            .IgnoreEntities(typeof(Product), typeof(Product))
+            .Build();
+    }
+
+    [Fact]
+    public void An_entity_both_declared_and_ignored_is_refused_at_build()
+    {
+        var declaredFirst = new ServiceCollection()
+            .AddAuditing()
+            .UseCustomStore<RecordingAuditStore>()
+            .DeclareEntity<Invoice>()
+            .IgnoreEntity<Invoice>();
+
+        var ignoredFirst = new ServiceCollection()
+            .AddAuditing()
+            .UseCustomStore<RecordingAuditStore>()
+            .IgnoreEntities(typeof(Invoice))
+            .DeclareEntities(typeof(Invoice));
+
+        foreach (var builder in new[] { declaredFirst, ignoredFirst })
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => builder.Build());
+            Assert.Contains(typeof(Invoice).FullName!, error.Message, StringComparison.Ordinal);
+            Assert.Contains("IgnoreEntity", error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void An_ignored_entity_sharing_a_declared_entitys_stored_name_is_refused_at_build()
+    {
+        // Two types, one name: a write addressed as For("Person", id) would be both recorded under
+        // one type's rules and suppressed under the other's ignore.
+        var builder = new ServiceCollection()
+            .AddAuditing()
+            .UseCustomStore<RecordingAuditStore>()
+            .DeclareEntity<PersonEntity>()
+            .IgnoreEntity<Duplicate.PersonEntity>();
+
+        var error = Assert.Throws<InvalidOperationException>(() => builder.Build());
+        Assert.Contains("'Person'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IgnoreEntity_validates_its_arguments()
+    {
+        var builder = new ServiceCollection().AddAuditing();
+
+        Assert.Throws<ArgumentNullException>(() => AuditingBuilderExtensions.IgnoreEntity<Product>(null!));
+        Assert.Throws<ArgumentNullException>(() => AuditingBuilderExtensions.IgnoreEntities(null!, typeof(Product)));
+        Assert.Throws<ArgumentNullException>(() => builder.IgnoreEntities(null!));
+        Assert.Throws<ArgumentNullException>(() => builder.IgnoreEntities(typeof(Product), null!));
+    }
+
     [Fact]
     public void A_default_page_size_above_the_maximum_is_refused_at_build()
     {

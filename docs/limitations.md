@@ -87,8 +87,14 @@ key if its history matters.
 ## Composite keys are refused
 
 An entry records a single key. An entity with a composite primary key throws when it is saved, with
-the three ways out in the message: a surrogate key, `[AuditIgnore]`, or recording by hand with
-`audit.For(name, id)` and a key you compose yourself.
+the ways out in the message: a surrogate key, `[AuditIgnore]` — or `.IgnoreEntity<T>()` at
+registration for a type you cannot annotate — or recording by hand with `audit.For(name, id)` and a
+key you compose yourself.
+
+An excluded entity's key is never read, so excluding it is enough: DotNetBoost.MultiLingual's own
+`Translation` row is keyed on four columns, and `.IgnoreEntity<Translation>()` is what lets the
+interceptor run in a context that saves one. Its skip is reported to the observer with an empty
+`entityId`, because the library does not compose a multi-column key even for a report.
 
 `DotNetBoost.Media` and `DotNetBoost.MultiLingual` refuse composite keys for the same reason, so an
 entity that cannot be audited cannot be given media or translations either.

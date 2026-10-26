@@ -399,7 +399,127 @@ public class EfCoreCaptureTests
             }));
 
         Assert.Contains("[AuditIgnore]", error.Message, StringComparison.Ordinal);
+        Assert.Contains("IgnoreEntity<", error.Message, StringComparison.Ordinal);
         Assert.Contains("audit.For(name, id)", error.Message, StringComparison.Ordinal);
+    }
+
+    // ── excluding a multi-column key ───────────────────────────────────────
+    //
+    // The refusal above tells the application to exclude the entity. These are the tests that doing
+    // so works: the skip is reported before anything tries to read the key, so an excluded entity's
+    // key shape is no longer the interceptor's business.
+
+    [Fact]
+    public async Task An_ignored_entity_with_a_multi_column_key_saves_beside_an_audited_one()
+    {
+        using var harness = new EfCoreHarness(build: b => b.IgnoreEntity<Translation>());
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            // The shape MultiLingual gives a catalogue save: the entity, and a translation row for it.
+            db.Products.Add(new Product { Name = "Widget", Price = 1m });
+            db.Translations.Add(new Translation
+            {
+                EntityName = "Product", EntityId = "1", PropertyName = "Name", LanguageCode = "ar", Value = "ودجت"
+            });
+            await db.SaveChangesAsync();
+        });
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            var product     = await db.Products.SingleAsync();
+            var translation = await db.Translations.SingleAsync();
+            product.Price     = 2m;
+            translation.Value = "أداة";
+            await db.SaveChangesAsync();
+        });
+
+        var entries = await harness.EntriesAsync();
+        Assert.All(entries, e => Assert.Equal("Product", e.EntityName));
+        Assert.Equal([AuditAction.Updated, AuditAction.Created], entries.Select(e => e.Action));
+
+        Assert.Equal(
+            [(AuditSuppression.EntityIgnored, "Translation", "", AuditAction.Created),
+             (AuditSuppression.EntityIgnored, "Translation", "", AuditAction.Updated)],
+            harness.Observer.Suppressed);
+    }
+
+    [Fact]
+    public async Task A_class_level_AuditIgnore_on_a_multi_column_key_no_longer_throws()
+    {
+        // The regression: the refusal's own advice was to add [AuditIgnore], and the skip that
+        // attribute causes then tried to read the multi-column key for its report and threw anyway.
+        using var harness = new EfCoreHarness();
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.IgnoredCompositeKeyeds.Add(new IgnoredCompositeKeyed { TenantId = 1, LocalId = 2, Label = "x" });
+            await db.SaveChangesAsync();
+        });
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.IgnoredCompositeKeyeds.Remove(await db.IgnoredCompositeKeyeds.SingleAsync());
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Empty(await harness.EntriesAsync());
+        Assert.Equal(
+            [(AuditSuppression.EntityIgnored, nameof(IgnoredCompositeKeyed), "", AuditAction.Created),
+             (AuditSuppression.EntityIgnored, nameof(IgnoredCompositeKeyed), "", AuditAction.Deleted)],
+            harness.Observer.Suppressed);
+    }
+
+    [Fact]
+    public async Task An_ignored_entity_with_a_key_too_long_to_address_is_reported_not_thrown()
+    {
+        // Not a multi-column key this time: a single one longer than the column holds. Excluded, so
+        // it never has to fit, and the report must not be what fails the save.
+        using var harness = new EfCoreHarness(build: b => b.IgnoreEntity<LongKeyed>());
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.LongKeyeds.Add(new LongKeyed { Code = new string('k', 100) });
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Empty(await harness.EntriesAsync());
+        Assert.Equal(
+            (AuditSuppression.EntityIgnored, nameof(LongKeyed), "", AuditAction.Created),
+            Assert.Single(harness.Observer.Suppressed));
+    }
+
+    [Fact]
+    public async Task An_ignored_entity_is_reported_as_ignored_rather_than_as_not_opted_in()
+    {
+        using var harness = new EfCoreHarness(o => o.RequireOptIn = true, build: b => b.IgnoreEntity<Translation>());
+
+        await harness.InScopeAsync(async (db, _) =>
+        {
+            db.Translations.Add(new Translation
+            {
+                EntityName = "Product", EntityId = "1", PropertyName = "Name", LanguageCode = "ar", Value = "x"
+            });
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Empty(await harness.EntriesAsync());
+        Assert.Equal(AuditSuppression.EntityIgnored, Assert.Single(harness.Observer.Suppressed).Reason);
+    }
+
+    [Fact]
+    public void Ignoring_an_entity_an_assembly_scan_declares_is_refused_at_build()
+    {
+        // Product carries [AuditEntity], so the scan declares it — and a type both declared and
+        // ignored is two instructions that cannot both be followed.
+        var builder = new ServiceCollection()
+            .AddAuditing()
+            .UseEntityFrameworkCore<TestDbContext>()
+            .DeclareEntitiesFrom(typeof(Product).Assembly)
+            .IgnoreEntity<Product>();
+
+        var error = Assert.Throws<InvalidOperationException>(() => builder.Build());
+        Assert.Contains(typeof(Product).FullName!, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

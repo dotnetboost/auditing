@@ -3,6 +3,36 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-preview.2] — Unreleased
+
+### Added
+- **`IgnoreEntity<TEntity>()` and `IgnoreEntities(params Type[])`** on the builder — a class-level
+  `[AuditIgnore]` for a type the application cannot annotate. The case it exists for is
+  DotNetBoost.MultiLingual's `Translation`, which shares the application's `DbContext`, is saved
+  beside every translated entity, and is keyed on four columns: until now it made
+  `UseAuditing(sp)` unusable beside `UseMultiLingual(sp)`.
+  - The same rule as the attribute: suppressed and reported as `EntityIgnored`, ahead of
+    `[Audited]` and `RequireOptIn`, subclasses included, and a write addressed by name —
+    `audit.For("Translation", id)` — suppressed too.
+  - Held in the options rather than in `AuditPlan`, which caches what a type's attributes say;
+    an ignore is configuration, like `RequireOptIn`.
+  - `Build()` refuses a type that is both declared (`DeclareEntity`, `DeclareEntities`, or an
+    assembly scan) and ignored, and an ignored type that shares a declared entity's stored name.
+    So an ignored type never appears in `GET /api/audit/entities`.
+  - Named `IgnoreEntity` rather than `Ignore` because EF Core's `modelBuilder.Ignore<T>()` means
+    "do not map this type", and the two would sit a few lines apart.
+
+### Fixed
+- **An excluded entity with a multi-column key no longer throws on save.** The interceptor reported
+  the skip with the entity's key, and reading a multi-column key throws — so a class-level
+  `[AuditIgnore]` on such an entity, which the refusal's own message recommends, failed every save
+  anyway, as did one that `RequireOptIn` left out. A skipped entity is now reported with an empty
+  key when its key spans several columns: the library never composes one, and empty is what a
+  report already says for an entity skipped before it was addressed — as it is for a single key
+  too long for the column, which threw the same way. An entity with a multi-column
+  key that is *not* excluded is still refused, and the message now names `IgnoreEntity<T>()`
+  alongside `[AuditIgnore]`.
+
 ## [1.0.0-preview.1] — 2026-10-23
 
 The first published build, and a preview rather than a release: nothing outside this repository has
