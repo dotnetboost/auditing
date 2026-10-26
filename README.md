@@ -312,6 +312,27 @@ services.AddAuditing(o =>
     .Build();
 ```
 
+**Excluding an entity.** `[AuditIgnore]` on a class keeps it out of the trail. For a type you do not
+own and so cannot annotate, say the same thing at registration with `.IgnoreEntity<T>()`. The case
+it was made for is DotNetBoost.MultiLingual, whose `Translation` rows share your `DbContext`, are
+saved beside every translated entity, and are keyed on four columns, which an audit entry cannot
+address:
+
+```csharp
+services.AddDbContext<AppDbContext>((sp, o) => o.UseNpgsql(cs).UseMultiLingual(sp).UseAuditing(sp));
+
+services.AddAuditing()
+    .UseEntityFrameworkCore<AppDbContext>()
+    .DeclareEntitiesFrom(typeof(Product).Assembly)
+    .IgnoreEntity<Translation>()                     // MultiLingual's row: saved, never audited
+    .Build();
+```
+
+It is the attribute's rule exactly: it beats `[Audited]` and `RequireOptIn`, and the skip is
+reported to the [observer](docs/observability.md) as `EntityIgnored`. It is not called `Ignore`
+because EF Core's `modelBuilder.Ignore<T>()` means "do not map this type"; this one leaves it mapped
+and saved. `Build()` refuses a type that is both declared and ignored.
+
 | I want to… | Guide |
 |---|---|
 | Record from Dapper or MongoDB, and know when each becomes durable | [Stores](docs/stores.md) |

@@ -133,6 +133,78 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
+        /// Never records <typeparamref name="TEntity"/> — a class-level <c>[AuditIgnore]</c>, for a
+        /// type the application cannot annotate because it does not own it.
+        /// <code>
+        /// services.AddAuditing()
+        ///         .UseEntityFrameworkCore&lt;AppDbContext&gt;()
+        ///         .DeclareEntitiesFrom(typeof(Product).Assembly)
+        ///         .IgnoreEntity&lt;Translation&gt;()     // DotNetBoost.MultiLingual's row
+        ///         .Build();
+        /// </code>
+        /// <para>
+        /// The case it exists for is a sibling library's entity in the application's own
+        /// <c>DbContext</c>: DotNetBoost.MultiLingual's <c>Translation</c> is saved beside every
+        /// translated entity, is keyed on four columns, and comes from a package the application
+        /// cannot add an attribute to. A trail of it would also repeat what the translated entity's
+        /// own history should say.
+        /// </para>
+        /// <para>
+        /// The same rule as the attribute, in every respect: the change is not recorded and is
+        /// reported to the observer as <c>EntityIgnored</c>; it wins over <c>[Audited]</c> and over
+        /// <c>RequireOptIn</c>; a subclass is ignored with its base; and a write addressed by name,
+        /// <c>audit.For("Translation", id)</c>, is suppressed as well, because the ignore names the
+        /// type as surely as a declaration would.
+        /// </para>
+        /// <para>
+        /// Named <c>IgnoreEntity</c> rather than <c>Ignore</c> because EF Core's
+        /// <c>modelBuilder.Ignore&lt;T&gt;()</c> already means something else — "this type is not
+        /// mapped" — and the two would sit a few lines apart in the same application. This one
+        /// leaves the type mapped and saved, and only keeps it out of the trail.
+        /// </para>
+        /// </summary>
+        /// <typeparam name="TEntity">The entity type.</typeparam>
+        /// <param name="builder">The builder.</param>
+        /// <returns>The builder, for chaining.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <c>null</c>.</exception>
+        /// <remarks>
+        /// <c>Build()</c> refuses a type that is also declared — by <c>DeclareEntity</c>,
+        /// <c>DeclareEntities</c> or an assembly scan — and one whose stored name a declared entity
+        /// also uses. Declared means "apply this type's rules", ignored means "never record it", and
+        /// the library will not guess which was meant.
+        /// </remarks>
+        public static AuditingBuilder IgnoreEntity<TEntity>(this AuditingBuilder builder)
+            where TEntity : class
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+
+            builder.Options.Ignore(typeof(TEntity));
+            return builder;
+        }
+
+        /// <summary>
+        /// Never records any of <paramref name="entityTypes"/>. See
+        /// <see cref="IgnoreEntity{TEntity}(AuditingBuilder)"/>.
+        /// </summary>
+        /// <param name="builder">The builder.</param>
+        /// <param name="entityTypes">The entity types.</param>
+        /// <returns>The builder, for chaining.</returns>
+        /// <exception cref="ArgumentNullException">Either argument, or one of the types, is <c>null</c>.</exception>
+        public static AuditingBuilder IgnoreEntities(this AuditingBuilder builder, params Type[] entityTypes)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentNullException.ThrowIfNull(entityTypes);
+
+            foreach (var type in entityTypes)
+            {
+                ArgumentNullException.ThrowIfNull(type);
+                builder.Options.Ignore(type);
+            }
+
+            return builder;
+        }
+
+        /// <summary>
         /// Keeps entries for <paramref name="retention"/>, for entities with no
         /// <c>[AuditRetention]</c> of their own. Nothing is deleted until a prune runs.
         /// </summary>

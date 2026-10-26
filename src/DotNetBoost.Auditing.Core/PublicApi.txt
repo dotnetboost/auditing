@@ -378,6 +378,8 @@ namespace Microsoft.Extensions.DependencyInjection
         public static DotNetBoost.Auditing.Core.AuditingBuilder DeclareEntitiesFrom(DotNetBoost.Auditing.Core.AuditingBuilder builder, System.Reflection.Assembly assembly);
         public static DotNetBoost.Auditing.Core.AuditingBuilder DeclareEntity<TEntity>(DotNetBoost.Auditing.Core.AuditingBuilder builder);
         public static DotNetBoost.Auditing.Core.AuditingBuilder DisableRecording(DotNetBoost.Auditing.Core.AuditingBuilder builder);
+        public static DotNetBoost.Auditing.Core.AuditingBuilder IgnoreEntities(DotNetBoost.Auditing.Core.AuditingBuilder builder, System.Type[] entityTypes);
+        public static DotNetBoost.Auditing.Core.AuditingBuilder IgnoreEntity<TEntity>(DotNetBoost.Auditing.Core.AuditingBuilder builder);
         public static DotNetBoost.Auditing.Core.AuditingBuilder RequireOptIn(DotNetBoost.Auditing.Core.AuditingBuilder builder);
         public static DotNetBoost.Auditing.Core.AuditingBuilder UseActorAccessor<TAccessor>(DotNetBoost.Auditing.Core.AuditingBuilder builder);
         public static DotNetBoost.Auditing.Core.AuditingBuilder UseCustomStore(DotNetBoost.Auditing.Core.AuditingBuilder builder, System.Func<System.IServiceProvider, DotNetBoost.Auditing.Core.Interfaces.IAuditStore> store);

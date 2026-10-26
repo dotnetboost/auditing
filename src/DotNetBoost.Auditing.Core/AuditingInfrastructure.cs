@@ -46,8 +46,8 @@ public sealed class AuditingBuilder
     /// </summary>
     /// <returns>The configured services, so a caller can carry on with them.</returns>
     /// <exception cref="InvalidOperationException">
-    /// No store is configured, the options contradict each other, or two declared entities claim
-    /// the same stored name.
+    /// No store is configured, the options contradict each other, two declared entities claim
+    /// the same stored name, or an entity excluded with <c>IgnoreEntity</c> is also declared.
     /// </exception>
     public IServiceCollection Build()
     {
@@ -95,7 +95,57 @@ public sealed class AuditingBuilder
             declared[name] = type;
         }
 
+        RefuseIgnoredDeclarations(declared);
+
         return declared.Count == 0 ? AuditModelRegistry.Empty : new AuditModelRegistry(declared);
+    }
+
+    /// <summary>
+    /// Refuses an <c>IgnoreEntity&lt;T&gt;()</c> that contradicts a declaration: the same type both
+    /// declared and ignored, or an ignored type sharing a declared entity's stored name.
+    /// </summary>
+    /// <remarks>
+    /// The first is two instructions that cannot both be followed — declared says "apply this type's
+    /// rules", ignored says "never record it" — and either reading would surprise someone, so the
+    /// library asks rather than picks. The second matters for a write addressed by name: with an
+    /// ignored and a declared type behind one name, <c>audit.For(name, id)</c> would be recorded
+    /// under one type's rules or suppressed under the other's ignore, chosen by nothing the caller
+    /// can see. It is the same refusal as two declared types under one name.
+    /// <para>
+    /// Also what keeps an ignored type out of the declared-entities listing
+    /// (<c>GET /api/audit/entities</c>): the listing is this registry, and an ignored type cannot be
+    /// in it.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">An ignored type is declared, or shares a declared name.</exception>
+    private void RefuseIgnoredDeclarations(Dictionary<string, Type> declared)
+    {
+        foreach (var ignored in Options.IgnoredEntities)
+        {
+            foreach (var (name, type) in declared)
+            {
+                // IsAssignableFrom rather than ==, because a subclass of an ignored type is ignored
+                // too, and declaring one would be the same contradiction one level down.
+                if (ignored.IsAssignableFrom(type))
+                {
+                    throw new InvalidOperationException(
+                        $"'{type.FullName}' is both declared and excluded with IgnoreEntity" +
+                        (type == ignored ? "" : $"<{ignored.Name}>, its base") +
+                        ". Declaring an entity applies its rules and ignoring it records nothing, so " +
+                        "one of the two is a mistake: remove the IgnoreEntity call, or stop declaring " +
+                        "the type (an assembly scan declares every class carrying [AuditEntity], " +
+                        "[Audited] or [AuditRetention]).");
+                }
+
+                if (string.Equals(AuditEntityNames.For(ignored), name, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"'{ignored.FullName}' is excluded with IgnoreEntity, and '{type.FullName}' is declared " +
+                        $"under the same entity name '{name}'. A write addressed by that name could be " +
+                        "either. Give the declared one a distinct [AuditEntity(\"…\")] name.");
+                }
+            }
+        }
     }
 
     /// <summary>

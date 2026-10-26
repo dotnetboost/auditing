@@ -294,9 +294,11 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
                 Recorder.ReportSuppressed(
                     suppression,
                     AuditEntityNames.For(entry.Metadata.ClrType),
-                    // Empty when the key arrives with the INSERT: this entity was skipped before it
-                    // was ever addressed, and inventing a placeholder would read as a real key.
-                    TrackedKeys.TryGetKey(entry) ?? string.Empty,
+                    // Empty when the key arrives with the INSERT, or spans several columns: this
+                    // entity was skipped before it was ever addressed, and inventing a placeholder
+                    // would read as a real key. Never a throw — a multi-column key is exactly what
+                    // an application is told to exclude, so the exclusion cannot trip over it.
+                    TrackedKeys.KeyForReport(entry),
                     action);
 
                 continue;
@@ -306,7 +308,9 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
 
             // Nothing moved. Left to the engine this would return null anyway, and with the same
             // report — but caught here it also saves deferring an entry that will turn out to be
-            // empty, so the report is made here too rather than lost to the shortcut.
+            // empty, so the report is made here too rather than lost to the shortcut. TryGetKey and
+            // not KeyForReport: only an entity that was NOT excluded gets this far, and for one of
+            // those a multi-column key is still refused, saved with a change or without one.
             if (action == AuditAction.Updated && changes.Count == 0)
             {
                 Recorder.ReportSuppressed(
@@ -351,7 +355,8 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
             var entityId = TrackedKeys.TryGetKey(entry)
                 ?? throw new InvalidOperationException(
                     $"{entry.Metadata.DisplayName()} still has no key after the save, so its creation " +
-                    "cannot be recorded. Assign the key in code, or exclude the entity with [AuditIgnore].");
+                    "cannot be recorded. Assign the key in code, or exclude the entity with [AuditIgnore] " +
+                    "or IgnoreEntity<T>().");
 
             Record(write with { EntityId = entityId });
         }

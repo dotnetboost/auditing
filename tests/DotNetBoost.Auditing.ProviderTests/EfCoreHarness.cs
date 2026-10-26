@@ -19,6 +19,9 @@ public class TestDbContext(DbContextOptions<TestDbContext> options) : DbContext(
     public DbSet<FluentlyKeyed> FluentlyKeyeds => Set<FluentlyKeyed>();
     public DbSet<CompositeKeyed> CompositeKeyeds => Set<CompositeKeyed>();
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<Translation> Translations => Set<Translation>();
+    public DbSet<IgnoredCompositeKeyed> IgnoredCompositeKeyeds => Set<IgnoredCompositeKeyed>();
+    public DbSet<LongKeyed> LongKeyeds => Set<LongKeyed>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,6 +32,9 @@ public class TestDbContext(DbContextOptions<TestDbContext> options) : DbContext(
         modelBuilder.Entity<FluentlyKeyed>().Property(f => f.Reference).ValueGeneratedNever();
         modelBuilder.Entity<CompositeKeyed>().HasKey(c => new { c.TenantId, c.LocalId });
         modelBuilder.Entity<Order>().OwnsOne(o => o.Address);
+        modelBuilder.Entity<Translation>().HasKey(t => new { t.EntityName, t.EntityId, t.PropertyName, t.LanguageCode });
+        modelBuilder.Entity<IgnoredCompositeKeyed>().HasKey(c => new { c.TenantId, c.LocalId });
+        modelBuilder.Entity<LongKeyed>().HasKey(l => l.Code);
 
         modelBuilder.ApplyAuditing();
 
@@ -73,7 +79,13 @@ internal sealed class EfCoreHarness : IDisposable
     private readonly SqliteConnection _connection;
     private readonly ServiceProvider _provider;
 
-    public EfCoreHarness(Action<AuditingOptions>? configure = null, bool capture = true)
+    /// <param name="configure">Applied to the options.</param>
+    /// <param name="capture">Whether the context records itself through the interceptor.</param>
+    /// <param name="build">Applied to the builder after the declarations, just before <c>Build()</c>.</param>
+    public EfCoreHarness(
+        Action<AuditingOptions>? configure = null,
+        bool capture = true,
+        Action<AuditingBuilder>? build = null)
     {
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
@@ -91,10 +103,12 @@ internal sealed class EfCoreHarness : IDisposable
                 o.UseAuditing(sp);
         });
 
-        services.AddAuditing(o => configure?.Invoke(o))
-                .UseEntityFrameworkCore<TestDbContext>()
-                .DeclareEntitiesFrom(typeof(Product).Assembly)
-                .Build();
+        var builder = services.AddAuditing(o => configure?.Invoke(o))
+                              .UseEntityFrameworkCore<TestDbContext>()
+                              .DeclareEntitiesFrom(typeof(Product).Assembly);
+
+        build?.Invoke(builder);
+        builder.Build();
 
         services.Replace(ServiceDescriptor.Scoped<IAuditActorAccessor>(_ => Actors));
 

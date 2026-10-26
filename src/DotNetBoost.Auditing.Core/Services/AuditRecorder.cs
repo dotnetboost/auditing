@@ -59,7 +59,7 @@ internal sealed class AuditRecorder(
     /// Why <paramref name="entityType"/> is not audited, or <c>null</c> when it is.
     /// </summary>
     /// <remarks>
-    /// The same three rules <see cref="RecordAsync"/> applies, in one place so a capture source
+    /// The same rules <see cref="RecordAsync"/> applies, in one place so a capture source
     /// that skips an entity early and the engine that would have skipped it late cannot disagree
     /// about why. Reporting is the caller's, because only the caller knows whether it is about to
     /// skip the entity or merely asking about it.
@@ -73,7 +73,9 @@ internal sealed class AuditRecorder(
 
         var plan = AuditPlan.For(entityType);
 
-        if (plan.Ignored)
+        // The attribute and IgnoreEntity<T>() are one rule from two sources: the plan caches what
+        // the type says, the options hold what this host was configured with.
+        if (plan.Ignored || _options.IsIgnored(entityType))
             return AuditSuppression.EntityIgnored;
 
         if (_options.RequireOptIn && !plan.OptedIn)
@@ -114,6 +116,14 @@ internal sealed class AuditRecorder(
         // The type when the caller had one, else whatever was declared under this name. With
         // neither there are no model rules to apply — see AuditWrite.EntityType.
         var plan = write.EntityType is { } type ? AuditPlan.For(type) : _registry.PlanFor(entityName);
+
+        // IgnoreEntity<T>(), ahead of everything that depends on a plan: an ignored type is never
+        // declared (Build() refuses both), so a write addressed by name has no plan to find, and
+        // without this it would be recorded — or, under opt-in, reported as undeclared — when the
+        // application said plainly not to. By type when there is one, so a subclass is caught; by
+        // name otherwise, which Build() has made unambiguous.
+        if (write.EntityType is { } written ? _options.IsIgnored(written) : _options.IsIgnored(entityName))
+            return Suppressed(AuditSuppression.EntityIgnored, entityName, entityId, write.Action);
 
         if (plan is not null)
         {

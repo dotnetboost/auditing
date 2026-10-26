@@ -196,8 +196,9 @@ internal static class TrackedKeys
             throw new InvalidOperationException(
                 $"{entry.Metadata.DisplayName()} has a composite primary key " +
                 $"({string.Join(", ", key.Properties.Select(p => p.Name))}). An audit entry records a " +
-                "single key. Give the entity a surrogate key, exclude it with [AuditIgnore], or record " +
-                "against it by hand with audit.For(name, id).");
+                "single key. Give the entity a surrogate key, exclude it with [AuditIgnore] — or with " +
+                $".IgnoreEntity<{entry.Metadata.ClrType.Name}>() at registration, for a type you cannot " +
+                "annotate — or record against it by hand with audit.For(name, id).");
         }
 
         var property = entry.Property(key.Properties[0].Name);
@@ -214,5 +215,40 @@ internal static class TrackedKeys
             return null;
 
         return EntityKey.ToKeyString(property.CurrentValue!);
+    }
+
+    /// <summary>
+    /// The key to put in a report about an entry that is <b>not</b> being recorded: its stored
+    /// string where it has one, and empty otherwise — never an exception.
+    /// </summary>
+    /// <remarks>
+    /// Empty rather than the parts joined together for a multi-column key, for the same reason
+    /// <see cref="TryGetKey"/> and both key accessors refuse to compose one: an
+    /// <see cref="AuditEntry.EntityId"/> is an address, Entity Addressing v1 has no composite form,
+    /// and a joined string would read as one this library chose — the separator, the order — for a
+    /// key the application never asked it to address. Empty is what a report already says for a
+    /// creation skipped before its key existed: this entity was skipped before it was addressed.
+    /// <para>
+    /// Only for a suppression. An entity that is about to be recorded still goes through
+    /// <see cref="TryGetKey"/> and still refuses a multi-column key, because there the key becomes
+    /// the entry's address.
+    /// </para>
+    /// </remarks>
+    internal static string KeyForReport(EntityEntry entry)
+    {
+        if (entry.Metadata.FindPrimaryKey() is not { Properties.Count: 1 })
+            return string.Empty;
+
+        try
+        {
+            return TryGetKey(entry) ?? string.Empty;
+        }
+        catch (InvalidOperationException)
+        {
+            // A single key this library could not address either — longer than EntityKey.MaxLength,
+            // or blank. The entity is excluded, so its key never had to fit the column; the report
+            // must not be what fails the application's save.
+            return string.Empty;
+        }
     }
 }
