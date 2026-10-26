@@ -39,10 +39,10 @@ Works with **.NET 8 and .NET 10**, on **SQL Server, PostgreSQL, SQLite or MongoD
 `Microsoft.Extensions.DependencyInjection.Abstractions` — and no dependency on any other
 DotNetBoost package.
 
-> **Status:** first preview on NuGet — **1.0.0-preview.1**, which is why every `dotnet add package`
+> **Status:** preview on NuGet — **1.0.0-preview.2**, which is why every `dotnet add package`
 > below needs `--prerelease`. A preview because nothing outside this repository has used the surface
 > yet, and the public API baseline is the part most likely to still move. All five packages are built
-> and tested: **480 tests** needing nothing installed, on both target frameworks, plus **202
+> and tested: **493 tests** needing nothing installed, on both target frameworks, plus **202
 > integration tests** against **PostgreSQL 16, SQL Server 2022 and MongoDB 7** in containers. See
 > [testing.md](docs/testing.md), which also lists what is not covered yet.
 

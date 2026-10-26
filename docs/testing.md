@@ -8,15 +8,15 @@ The layout is the one `DotNetBoost.Settings`, `.Media` and `.MultiLingual` use �
 | Project | Tests | TFMs | Needs |
 |---|---|---|---|
 | `TestSupport` | — | net8.0, net10.0 | The shared doubles and conformance suites. Not a test project |
-| `UnitTests` | 181 | net8.0, net10.0 | Nothing. The Core engine, over the in-memory double |
-| `ProviderTests` | 233 | net8.0, net10.0 | Nothing. Every store, over SQLite |
+| `UnitTests` | 189 | net8.0, net10.0 | Nothing. The Core engine, over the in-memory double |
+| `ProviderTests` | 238 | net8.0, net10.0 | Nothing. Every store, over SQLite |
 | `ApiTests` | 59 | net8.0, net10.0 | Nothing. A real ASP.NET Core host |
 | `SurfaceTests` | 7 | net8.0, net10.0 | Nothing. The public surface of all five packages, against a committed baseline |
 | `IntegrationTests` | 202 | net10.0 | **Docker.** PostgreSQL 16, SQL Server 2022, MongoDB 7 (replica set) |
 | `ScaleTests` | 4 | net10.0 | **Docker, and opt-in.** Measurements on a million-entry trail. Skipped unless asked for, never run by CI |
 
 ```bash
-dotnet test                                                   # everything — 686 tests
+dotnet test                                                   # everything — 699 tests
 dotnet test tests/DotNetBoost.Auditing.IntegrationTests       # containers only
 dotnet test --filter "FullyQualifiedName!~SqlServer"          # skip the slow fixture
 ```

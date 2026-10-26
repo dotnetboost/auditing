@@ -3,7 +3,11 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [1.0.0-preview.2] — Unreleased
+## [1.0.0-preview.2] — 2026-10-26
+
+Makes `UseAuditing(sp)` usable in a context that DotNetBoost.MultiLingual also saves to. 493 tests
+on net8.0 and net10.0 needing nothing installed, plus 202 integration tests against PostgreSQL,
+SQL Server and MongoDB in containers.
 
 ### Added
 - **`IgnoreEntity<TEntity>()` and `IgnoreEntities(params Type[])`** on the builder — a class-level
