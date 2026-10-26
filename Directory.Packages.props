@@ -14,16 +14,30 @@
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.400" />
   </ItemGroup>
 
-  <!-- Aspire: aspire/ and samples/ only, never a shipped package. Same versions as the sibling
-       libraries, so the AppHosts share one restored Aspire bundle. -->
+  <!-- ──────────────────────────────────────────────────────────────────────────
+       Aspire: aspire/ and samples/ only, never a shipped package. The same version as
+       dotnetboost-sample, so the AppHosts share one restored Aspire bundle.
+
+       All five move together, and so does the Aspire.AppHost.Sdk version in the AppHost csproj:
+       the SDK generates the `Projects.*` handles the hosting packages consume, so a version split
+       between the two is not a combination anybody tests.
+
+       13.6.2 is the floor here, not a preference. Below it the AppHost resolves MessagePack
+       2.5.302 transitively, through StreamJsonRpc, and 2.5.302 is the subject of
+       GHSA-qhrr-8q5h-9q3h (CVE-2026-92707, moderate) — which NuGet's audit reports as NU1902 and
+       TreatWarningsAsErrors turns into a restore that fails before a single file compiles.
+       13.6.2 was the first release to depend on MessagePack 2.5.307 directly, and a package's own
+       dependency sits nearer than one it inherits, so the advisory is answered by the version
+       chosen here rather than by a direct pin of something only Aspire uses.
+       ────────────────────────────────────────────────────────────────────────── -->
   <ItemGroup Label="Aspire — AppHost (orchestration)">
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.2" />
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.2" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.4" />
     <!-- Runs the Nuxt dashboard in clients/dashboard as an orchestrated resource. -->
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.4" />
     <!-- Referenced only when the matching block in AppHost.cs is uncommented. -->
-    <PackageVersion Include="Aspire.Hosting.SqlServer" Version="13.5.2" />
-    <PackageVersion Include="Aspire.Hosting.MongoDB" Version="13.5.2" />
+    <PackageVersion Include="Aspire.Hosting.SqlServer" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.MongoDB" Version="13.6.4" />
   </ItemGroup>
 
   <ItemGroup Label="Aspire — consumed by the sample API">
@@ -113,7 +127,8 @@
 
   <ItemGroup Label="ASP.NET Core testing — net10.0" Condition="'$(_Net8)' != 'true'">
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+    <!-- 10.0.12 at least: Aspire.Hosting.AppHost 13.6 depends on it. -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup Label="EF Core — net8.0" Condition="'$(_Net8)' == 'true'">
@@ -148,17 +163,28 @@
          which is the only project that references SqlClient; transitive pinning is on for
          everything that is not a shipped library, so this lifts it there and nowhere else. -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
-    <!-- Aspire.Hosting.AppHost -> MessagePack 2.5.302 (GHSA-qhrr-8q5h-9q3h). 2.5.307 is the last
-         patch of that line, so it stays on the major Aspire was built against. -->
-    <PackageVersion Include="MessagePack" Version="2.5.307" />
   </ItemGroup>
 
-  <ItemGroup Label="Microsoft.Extensions — net10.0" Condition="'$(_Net8)' != 'true'">
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+  <!--
+    Split on IsShippedLibrary for the same reason as net8.0, though the numbers differ by less: what
+    a shipped library is built against becomes the floor in its nuspec, so it moves only when the
+    library needs it to. Tests, samples and the AppHost take the latest patch — and have to be at
+    least 10.0.12, which Aspire.Hosting.AppHost 13.6 asks for, or transitive pinning makes the
+    AppHost's restore a downgrade (NU1109).
+  -->
+  <ItemGroup Label="Microsoft.Extensions — net10.0, shipped libraries" Condition="'$(_Net8)' != 'true' and '$(IsShippedLibrary)' == 'true'">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Label="Microsoft.Extensions — net10.0, tests, samples and the AppHost" Condition="'$(_Net8)' != 'true' and '$(IsShippedLibrary)' != 'true'">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.14" />
   </ItemGroup>
 </Project>

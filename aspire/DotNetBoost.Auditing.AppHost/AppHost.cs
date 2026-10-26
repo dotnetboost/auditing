@@ -66,8 +66,9 @@ var dapperDatabase = postgres.AddDatabase("auditingdapper");
 //  Mongo Express is the counterpart to WithPgWeb, and worth opening once: an entry here is ONE
 //  document with its property changes embedded, where next door it is a row plus a row per property.
 //
-//  This is a STANDALONE mongod — Aspire.Hosting.MongoDB 13.5.2 has no WithReplicaSet — so
-//  transactions are not available, and the store's WithSession(session) has nothing to enlist in.
+//  This is a STANDALONE mongod — Aspire.Hosting.MongoDB 13.6.4 does have WithReplicaSet, but this
+//  AppHost does not call it yet — so transactions are not available, and the store's
+//  WithSession(session) has nothing to enlist in.
 //  That is not hidden from the sample: POST /api/products/{id}/fail exists to show the window it
 //  leaves open, and samples/SampleApp.MongoDb/README.md has the command for a one-node replica set
 //  if you want to close it.
