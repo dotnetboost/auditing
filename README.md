@@ -284,7 +284,8 @@ change and its trail land together or neither does. A creation with a store-gene
 exception — its id does not exist until the INSERT has run, so that entry needs a second save, and
 the interceptor opens a transaction around both when the caller has none. Assign keys in code and
 creations join the single-save path too; [limitations.md](docs/limitations.md) has the two cases
-that cannot be made atomic.
+that cannot be made atomic, and what changes when
+[another library's interceptor shares the context](docs/limitations.md#sharing-a-dbcontext-with-other-savechanges-interceptors).
 
 **Dapper and MongoDB write when they are called** rather than joining a unit of work, so atomicity
 is yours to arrange: hand the first your transaction, or the second a session, and the guarantee is

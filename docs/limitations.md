@@ -45,6 +45,100 @@ Both still record, rather than refusing. They are the holes in the headline guar
 
 Neither applies when nothing is deferred — see above.
 
+An ambient `TransactionScope` is not one of them. Inside a scope the interceptor opens nothing:
+both saves enlist in the scope and commit or roll back with it. (The provider has to support
+ambient transactions; EF's SQLite provider does not.)
+
+## Sharing a DbContext with other SaveChanges interceptors
+
+Another library's interceptor on the same context (DotNetBoost.MultiLingual, say) changes one
+thing: **who owns the transaction**. What this interceptor does at each step:
+
+| Step | What it does |
+|---|---|
+| `SavingChanges` | Captures. When there are deferred creations and no transaction is open (neither `Database.CurrentTransaction` nor an ambient `TransactionScope`), opens one. When one is open, remembers it |
+| `SavedChanges` | Writes the deferred entries through the same context. That is a nested `SaveChanges`, which other interceptors see too. Then commits the transaction it opened, unless another `SaveChanges` interceptor is registered after it (next row) |
+| EF's `DbContext.SavedChanges` event | Commits the transaction it opened, when another `SaveChanges` interceptor follows it. EF raises the event once every interceptor's `SavedChanges` has returned, so their post-save work is inside the transaction too |
+| `SaveChangesFailed`, `SaveChangesCanceled`, `ThrowingConcurrencyException` | Rolls back the transaction it opened |
+
+A `SaveChanges` another interceptor issues from inside a save — from its `SavedChanges`, after EF
+has accepted the changes — is recognised as **nested**: its work joins the save in progress, which
+alone writes, commits or rolls back. An interceptor sharing the context should count nested saves
+the same way, because the deferred write above is one.
+
+**Without a retrying strategy the order does not matter**: registered before or after
+`UseAuditing(sp)`, another interceptor's work is inside the same transaction. With Auditing first,
+the commit waits for EF's event — synchronous even under `SaveChangesAsync`, because the event is:
+one blocking round trip, and only on a context where another `SaveChanges` interceptor follows this
+one.
+
+**With a retrying strategy the order does not matter either.** DotNetBoost.MultiLingual, with a
+retrying strategy and no caller transaction, suppresses the save and replays it inside the strategy
+and a transaction of its own. This interceptor records the replay as the save, once per change,
+inside that transaction, and again once per change if the strategy retries it. Registered before
+MultiLingual, it captures the original save first and then throws that capture away when the replay
+starts; registering MultiLingual first saves that work, and nothing else.
+
+**When another interceptor commits first.** An interceptor registered before this one that opens a
+transaction in `SavingChanges` and commits it in its own `SavedChanges` leaves the deferred entries
+nothing to be atomic with: by the time they are written, the transaction is gone. This interceptor
+notices, and by default writes them anyway and reports it — to `IAuditObserver.AtomicityLost` and the
+`dotnetboost.auditing.atomicity.lost` counter. `OnLostAtomicity(LostAtomicity.Throw)` fails the save
+instead, which is what tests should use. Neither undoes the change: it is already committed.
+
+What to do when you share a context:
+
+| Your setup | Do this |
+|---|---|
+| Keys assigned in code (a `Guid`, HiLo, a sequence) | Nothing: no creation is deferred, so there is no second save and no transaction to share |
+| No retrying strategy | Nothing, in either order. To make every save atomic regardless of what other interceptors do, open the transaction yourself (below) |
+| A retrying strategy (`EnableRetryOnFailure`) | Nothing, in either order. Registering an interceptor that replays the save (MultiLingual) before `UseAuditing(sp)` saves a capture that would be thrown away |
+| Another library's table with a composite key | Exclude it with `IgnoreEntity<T>()`: composite keys are refused, so it would otherwise fail every save that writes it. MultiLingual's `Translation` is the case |
+
+The application-owned transaction, in the context. Override the synchronous `SaveChanges(bool)`
+the same way if you call it:
+
+```csharp
+public override async Task<int> SaveChangesAsync(bool accept, CancellationToken ct = default)
+{
+    if (Database.CurrentTransaction is not null || Transaction.Current is not null)
+        return await base.SaveChangesAsync(accept, ct);
+
+    await using var tx = await Database.BeginTransactionAsync(ct);
+    var result = await base.SaveChangesAsync(accept, ct);
+    await tx.CommitAsync(ct);
+    return result;
+}
+```
+
+Under `EnableRetryOnFailure`, wrap the body in `Database.CreateExecutionStrategy().ExecuteAsync(...)`.
+**Do not** use EF's usual `SaveChangesAsync(acceptAllChangesOnSuccess: false)` … `AcceptAllChanges()`
+retry pattern here: this interceptor saves again from `SavedChanges`, before the changes are
+accepted, so the second save would write them again — an added row inserted twice, a deleted one
+failing as a concurrency conflict. It also hides the one signal this interceptor has for telling a
+save nested inside one of its own from a save that never completed — whether EF has accepted the
+outer save's changes — so another interceptor's nested save is taken for a new one, and the
+transaction this interceptor opened is rolled back under it.
+
+## A throw from a later interceptor's `SavingChanges` is cleaned up by the next save
+
+When a creation is deferred, the interceptor opens its transaction in `SavingChanges`. EF calls the
+`SavingChanges` hooks before the part of `SaveChanges` that reports failures, so if an interceptor
+registered **after** `UseAuditing(sp)` throws from its own `SavingChanges`, no hook of this one runs
+again for that save. The transaction stays open on the context **until the context saves again or
+is disposed**. The next save recognises the abandoned one, rolls its transaction back, drops the
+entries it captured, and starts over — so a retry records each change once. Measured, not inferred.
+
+A failure or a cancellation anywhere later in the save — the database refusing a row, a concurrency
+conflict, the request being aborted — is reported, and rolled back at once.
+
+## A suppressed save is not recorded
+
+An interceptor that returns `InterceptionResult<int>.SuppressWithResult(...)` from `SavingChanges`
+skips EF's write and takes responsibility for the save. This one then records nothing for it, and
+opens no transaction. An interceptor that suppresses a save and replays it through `SaveChanges`
+— as DotNetBoost.MultiLingual does under a retrying strategy — is recorded through the replay.
+
 ## `db.Update(entity)` has no before-image
 
 `Update(entity)` and `Entry(entity).State = Modified` on an entity the context never loaded give EF
@@ -250,6 +344,14 @@ need more, you need database-level controls; claiming otherwise in a `1.0` would
 A history of changes is not a history of states. Rebuilding "the product as it was on 1 March" from
 a change list is only correct if the trail is complete from creation, which it never is for a table
 that existed before the library was installed. SQL Server temporal tables do this properly.
+
+## Every audited context maps the audit tables
+
+Entries are added to the context being saved, so a scope can hold several audited contexts —
+another instance of the registered type, or another type — and each writes its own trail in its
+own save. A context with `UseAuditing(sp)` whose model lacks the tables
+(`modelBuilder.ApplyAuditing()`) is refused on its first save, before anything is written. Explicit
+`IAuditManager` calls still go to the context registered with `UseEntityFrameworkCore<TContext>()`.
 
 ## Context pooling is not supported
 
