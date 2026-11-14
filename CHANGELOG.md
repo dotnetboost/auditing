@@ -3,6 +3,16 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- **Aspire moved from 13.6.4 to 13.6.5**, for
+  [GHSA-f7vh-h5g3-7jrh](https://github.com/advisories/GHSA-f7vh-h5g3-7jrh) (CVE-2026-120006), an
+  elevation-of-privilege vulnerability in `Aspire.Hosting` and `Aspire.Hosting.AppHost` below
+  13.6.5. Only the local AppHost uses Aspire; no shipped package depends on it, so nothing
+  that consumes the library is affected. NuGet's audit fails the restore on 13.6.4, which is what
+  this unblocks.
+
 ## [1.0.0-preview.2] — 2026-10-26
 
 Makes `UseAuditing(sp)` usable in a context that DotNetBoost.MultiLingual also saves to. 493 tests

@@ -31,13 +31,13 @@
        chosen here rather than by a direct pin of something only Aspire uses.
        ────────────────────────────────────────────────────────────────────────── -->
   <ItemGroup Label="Aspire — AppHost (orchestration)">
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.4" />
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.5" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.5" />
     <!-- Runs the Nuxt dashboard in clients/dashboard as an orchestrated resource. -->
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.5" />
     <!-- Referenced only when the matching block in AppHost.cs is uncommented. -->
-    <PackageVersion Include="Aspire.Hosting.SqlServer" Version="13.6.4" />
-    <PackageVersion Include="Aspire.Hosting.MongoDB" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.SqlServer" Version="13.6.5" />
+    <PackageVersion Include="Aspire.Hosting.MongoDB" Version="13.6.5" />
   </ItemGroup>
 
   <ItemGroup Label="Aspire — consumed by the sample API">
