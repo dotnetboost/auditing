@@ -66,6 +66,13 @@ public static class AuditingTelemetry
     /// </summary>
     public const string EntriesDeleted = "dotnetboost.auditing.entries.deleted";
 
+    /// <summary>
+    /// Saves whose deferred <c>Created</c> entries were written outside the transaction of the
+    /// change, because another <c>SaveChanges</c> interceptor committed it first. Should stay at
+    /// zero; anything else is a composition to fix — see <c>docs/limitations.md</c>.
+    /// </summary>
+    public const string AtomicityLost = "dotnetboost.auditing.atomicity.lost";
+
     /// <summary>The entity's stored name — <c>Product</c>.</summary>
     /// <remarks>
     /// Bounded by the application's model, which is what makes it safe to tag by. <b>The entity's

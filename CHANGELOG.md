@@ -5,6 +5,67 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Makes the EF Core capture safe beside another library's `SaveChanges` interceptor — such as
+DotNetBoost.MultiLingual's — registered before it or after it, with or without a retrying strategy. 543
+tests on net8.0 and net10.0 needing nothing installed, plus 280 integration tests against
+PostgreSQL, SQL Server and MongoDB in containers.
+
+### Added
+- **`OnLostAtomicity(LostAtomicity.Report | Throw)`** on the builder, **`IAuditObserver.AtomicityLost`**
+  (a default member, so existing observers still compile) and the
+  **`dotnetboost.auditing.atomicity.lost`** counter. When an interceptor registered earlier commits
+  the transaction in its own `SavedChanges`, the deferred `Created` entries can no longer be atomic
+  with the change. That used to happen silently; it is now reported (the default — the
+  `LoggingAuditObserver` logs it as an error), or fails the save under `Throw`.
+
+### Changed
+- **With another `SaveChanges` interceptor registered after it, the capture commits its own
+  transaction from EF's `DbContext.SavedChanges` event,** once every interceptor has finished,
+  instead of in its own `SavedChanges`. The later interceptor's post-save work is then inside the
+  transaction, and a failure in it rolls the entity and its entry back. The event is synchronous, so
+  that commit is one blocking round trip, even under `SaveChangesAsync`; with no interceptor after
+  it, the commit stays where it was.
+- **The EF Core capture adds its entries to the context being saved, instead of through
+  `IAuditStore.AppendAsync`.** The store is bound to the scope's registered context, which is not
+  always the one saving (see the second-context fix below). Explicit `IAuditManager` calls still go
+  through the store. So a store wrapped or replaced to observe entries as they are recorded no
+  longer sees the capture's: count them with the `dotnetboost.auditing.entries.recorded` counter,
+  which still counts every one, or read them from the table.
+
+### Fixed
+- **A save another interceptor issues from inside this one is nested, not a new save.** It joins
+  the save in progress; only the outermost save writes the deferred entries, commits or rolls back.
+  Before, the nested save's completion did all three and the outer save's found nothing left.
+- **A save replayed by another interceptor is recorded once.** DotNetBoost.MultiLingual replays a
+  save under a retrying strategy; with the capture registered first, every change was recorded twice,
+  and again after each retry. Either registration order is now correct.
+- **A rollback that fails while a save is already failing no longer hides why the save failed.**
+  The rollback is best-effort on those paths: disposing the transaction rolls back what is left, and
+  the caller sees the save's own exception.
+- **A save abandoned when a later interceptor's `SavingChanges` throws is cleaned up by the next
+  save** on that context, which rolls back the transaction left open and records each change once.
+  EF reports nothing for such a save, so until the next save the transaction stays open.
+- **A concurrency conflict now rolls back the capture's transaction.** EF reports it through
+  `ThrowingConcurrencyException`, not `SaveChangesFailed`, so the transaction stayed open. The
+  rollback waits for EF's `DbContext.SaveChangesFailed` event: EF raises the hook while it is still
+  reading the batch, and PostgreSQL and SQL Server refuse a `ROLLBACK` on a busy connection — whose
+  error would then replace `DbUpdateConcurrencyException`.
+- **A cancelled save no longer leaves the interceptor's transaction open.** EF reports a
+  cancellation through `SaveChangesCanceled`, which the interceptor did not handle, so a save with
+  a deferred creation kept its transaction and its state on the context, and retrying the same
+  save recorded the creation twice. It now rolls back exactly as it does for `SaveChangesFailed`.
+- **A creation inside a `TransactionScope` no longer throws.** The interceptor tried to open a
+  transaction of its own inside the ambient one, which EF refuses. It now opens none, and both
+  saves enlist in the scope.
+- **A save another interceptor suppressed is no longer recorded.** With `SuppressWithResult`, the
+  interceptor still captured: an update left an entry tracked for the context's next save, and a
+  deferred creation threw because its key never arrived.
+- **A second audited context in a scope now writes its own entries.** The capture recorded through
+  the store, which holds the scope's registered context, so entries for another instance (or
+  another type) were tracked on the wrong context and never written by the save they described.
+  Entries now go to the context being saved, and a context with `UseAuditing(sp)` but no audit
+  tables is refused with the fix in the message.
+
 ### Security
 - **Aspire moved from 13.6.4 to 13.6.5**, for
   [GHSA-f7vh-h5g3-7jrh](https://github.com/advisories/GHSA-f7vh-h5g3-7jrh) (CVE-2026-120006), an

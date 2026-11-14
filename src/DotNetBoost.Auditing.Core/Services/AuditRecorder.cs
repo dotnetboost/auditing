@@ -102,6 +102,27 @@ internal sealed class AuditRecorder(
     /// <summary>Records one change, applying the model's rules and the engine's formatting.</summary>
     internal async Task<AuditEntry?> RecordAsync(AuditWrite write, CancellationToken ct = default)
     {
+        if (Prepare(write) is not { } entry)
+            return null;
+
+        await _store.AppendAsync(entry, ct).ConfigureAwait(false);
+        Counted(entry);
+
+        return entry;
+    }
+
+    /// <summary>
+    /// Builds the entry for one change, applying the model's rules and the engine's formatting, or
+    /// returns <c>null</c> after reporting why it is not recorded. Nothing is stored.
+    /// </summary>
+    /// <remarks>
+    /// Split from <see cref="RecordAsync"/> for the EF Core capture, which adds the entry to the
+    /// context being saved rather than to the store's context: those are different instances when
+    /// a scope holds more than one context. A caller that stores the entry itself calls
+    /// <see cref="Counted"/> once it has.
+    /// </remarks>
+    internal AuditEntry? Prepare(AuditWrite write)
+    {
         ArgumentNullException.ThrowIfNull(write);
 
         // Reported before the addressing is validated, because the kill switch is the one
@@ -176,14 +197,36 @@ internal sealed class AuditRecorder(
             entry.Changes.Add(change);
         }
 
-        await _store.AppendAsync(entry, ct).ConfigureAwait(false);
-
-        // Counted here, which is "handed to the store" and not "committed" — the EF Core store only
-        // tracks an entry, and the caller's SaveChanges is what makes it durable. See
-        // AuditingTelemetry.EntriesRecorded.
-        _metrics.Recorded(entityName, write.Action);
-
         return entry;
+    }
+
+    /// <summary>
+    /// Counts an entry once it has been handed to storage, which is not "committed": the EF Core
+    /// store and capture only track an entry, and the caller's <c>SaveChanges</c> is what makes it
+    /// durable. See <c>AuditingTelemetry.EntriesRecorded</c>.
+    /// </summary>
+    internal void Counted(AuditEntry entry) => _metrics.Recorded(entry.EntityName, entry.Action);
+
+    /// <summary>
+    /// Reports a save whose deferred entries are about to be written outside the change's
+    /// transaction, or throws under <see cref="LostAtomicity.Throw"/>.
+    /// </summary>
+    /// <param name="correlationId">The save's correlation id.</param>
+    /// <param name="entries">How many entries that concerns.</param>
+    internal void AtomicityLost(string correlationId, int entries)
+    {
+        if (_options.OnLostAtomicity == LostAtomicity.Throw)
+        {
+            throw new InvalidOperationException(
+                "The transaction this save ran in was committed before DotNetBoost.Auditing wrote the " +
+                $"Created entries for {entries} entities with store-generated keys, so they cannot be atomic " +
+                "with the change any more. Another SaveChanges interceptor committed it from its own " +
+                "SavedChanges. Open the transaction yourself around SaveChanges, or assign these entities' " +
+                "keys in code. See docs/limitations.md, \"Sharing a DbContext with other SaveChanges interceptors\".");
+        }
+
+        _metrics.AtomicityLost();
+        _observer.AtomicityLost(correlationId, entries);
     }
 
     /// <summary>

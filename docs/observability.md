@@ -55,8 +55,16 @@ are no attributes to read, so it reports what it knows. This is the only failure
 that cannot be undone, and one line at `Build()` prevents it:
 `DeclareEntitiesFrom(typeof(Product).Assembly)`.
 
+One report is an **error**: **atomicity lost**. The EF Core interceptor wrote deferred `Created`
+entries outside the transaction of the change they describe, because another `SaveChanges`
+interceptor committed it first (see
+[limitations.md](limitations.md#sharing-a-dbcontext-with-other-savechanges-interceptors)). It names
+the save's correlation id, which those entries carry. Under `OnLostAtomicity(LostAtomicity.Throw)`
+the save fails instead and nothing is reported.
+
 For anything other than logging — a counter of your own, a health check, an alert — implement
-`IAuditObserver` and register it with `.UseObserver<T>()`. Two methods, and the interface says what
+`IAuditObserver` and register it with `.UseObserver<T>()`. Three methods — `AtomicityLost` has a
+default that does nothing, so an observer written before it existed still compiles — and the interface says what
 an implementation may not do: **throw, or block.** Both are called on the recording path,
 synchronously, including from inside an EF Core `SaveChanges`, so an exception there fails the
 business write that was being audited.
@@ -73,6 +81,7 @@ builder.Services.AddOpenTelemetry()
 | `dotnetboost.auditing.entries.recorded` | `{entry}` | `audit.entity`, `audit.action` |
 | `dotnetboost.auditing.writes.suppressed` | `{write}` | `audit.entity`, `audit.reason`, `audit.action` |
 | `dotnetboost.auditing.entries.deleted` | `{entry}` | `audit.operation` — `prune` or `erase` |
+| `dotnetboost.auditing.atomicity.lost` | `{save}` | none. Should stay at zero; anything else is an interceptor composition to fix |
 
 **The first one is what you alert on, and it is the absence that matters.** "This entity recorded
 nothing for an hour" is the shape of every way a trail stops covering a table, and it is a question

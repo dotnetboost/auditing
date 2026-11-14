@@ -19,6 +19,7 @@ namespace DotNetBoost.Auditing.Core
     public sealed class AuditingOptions
     {
         public AuditingOptions();
+        public DotNetBoost.Auditing.Core.Models.LostAtomicity OnLostAtomicity { get; set; }
         public System.TimeSpan? Retention { get; set; }
         public bool Enabled { get; set; }
         public bool RecordCreatedValues { get; set; }
@@ -34,6 +35,7 @@ namespace DotNetBoost.Auditing.Core
     }
     public static class AuditingTelemetry
     {
+        public const string AtomicityLost = "dotnetboost.auditing.atomicity.lost";
         public const string EntriesDeleted = "dotnetboost.auditing.entries.deleted";
         public const string EntriesRecorded = "dotnetboost.auditing.entries.recorded";
         public const string MeterName = "DotNetBoost.Auditing";
@@ -117,6 +119,7 @@ namespace DotNetBoost.Auditing.Core.Interfaces
     {
         public abstract void RecordedWithoutModelRules(string entityName, string entityId, DotNetBoost.Auditing.Core.Models.AuditAction action);
         public abstract void WriteSuppressed(DotNetBoost.Auditing.Core.Models.AuditSuppression reason, string entityName, string entityId, DotNetBoost.Auditing.Core.Models.AuditAction action);
+        public virtual void AtomicityLost(string correlationId, int entries);
     }
     public interface IAuditStore
     {
@@ -342,6 +345,11 @@ namespace DotNetBoost.Auditing.Core.Models
         public string? CorrelationId { get; init; }
         public string? Metadata { get; init; }
     }
+    public enum LostAtomicity : System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable, int
+    {
+        public const DotNetBoost.Auditing.Core.Models.LostAtomicity Report = 0;
+        public const DotNetBoost.Auditing.Core.Models.LostAtomicity Throw = 1;
+    }
 }
 
 namespace DotNetBoost.Auditing.Core.Services
@@ -380,6 +388,7 @@ namespace Microsoft.Extensions.DependencyInjection
         public static DotNetBoost.Auditing.Core.AuditingBuilder DisableRecording(DotNetBoost.Auditing.Core.AuditingBuilder builder);
         public static DotNetBoost.Auditing.Core.AuditingBuilder IgnoreEntities(DotNetBoost.Auditing.Core.AuditingBuilder builder, System.Type[] entityTypes);
         public static DotNetBoost.Auditing.Core.AuditingBuilder IgnoreEntity<TEntity>(DotNetBoost.Auditing.Core.AuditingBuilder builder);
+        public static DotNetBoost.Auditing.Core.AuditingBuilder OnLostAtomicity(DotNetBoost.Auditing.Core.AuditingBuilder builder, DotNetBoost.Auditing.Core.Models.LostAtomicity behaviour);
         public static DotNetBoost.Auditing.Core.AuditingBuilder RequireOptIn(DotNetBoost.Auditing.Core.AuditingBuilder builder);
         public static DotNetBoost.Auditing.Core.AuditingBuilder UseActorAccessor<TAccessor>(DotNetBoost.Auditing.Core.AuditingBuilder builder);
         public static DotNetBoost.Auditing.Core.AuditingBuilder UseCustomStore(DotNetBoost.Auditing.Core.AuditingBuilder builder, System.Func<System.IServiceProvider, DotNetBoost.Auditing.Core.Interfaces.IAuditStore> store);

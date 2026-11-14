@@ -28,6 +28,7 @@ reads the declared entities and refuses a configuration with no store.
 | `.RequireOptIn()` | Core | Record only entities marked `[Audited]` |
 | `.WithoutCreatedAndDeletedValues()` | Core | Record that a row appeared or went, without its values |
 | `.DisableRecording()` | Core | The kill switch. Reads still work; every record call returns `null` |
+| `.OnLostAtomicity(LostAtomicity)` | Core | When another `SaveChanges` interceptor commits the transaction before the EF Core capture writes its deferred `Created` entries: `Report` (default — write them and report it) or `Throw` (fail the save; use it in tests) |
 | `.UseActorAccessor<TAccessor>()` | Core | Replace how the actor is read. Registered **scoped** — an accessor worth having reads something per request |
 | `.UseEntityKeyAccessor<TAccessor>()` | Core | Replace how entity keys are read. Both EF Core providers register one that reads the model instead |
 | `.UseObserver<TObserver>()` | Core | Be told what the engine decides **not** to record. Registered **singleton**; the default does nothing |

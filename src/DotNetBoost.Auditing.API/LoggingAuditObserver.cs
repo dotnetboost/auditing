@@ -78,6 +78,17 @@ public sealed partial class LoggingAuditObserver(ILogger<LoggingAuditObserver> l
     public void RecordedWithoutModelRules(string entityName, string entityId, AuditAction action) =>
         LogNoModelRules(_logger, action, entityName, entityId);
 
+    /// <inheritdoc/>
+    public void AtomicityLost(string correlationId, int entries) =>
+        LogAtomicityLost(_logger, entries, correlationId);
+
+    [LoggerMessage(EventId = 7107, Level = LogLevel.Error,
+        Message = "Wrote {Entries} Created entries outside the transaction of the change they describe " +
+                  "(correlation {CorrelationId}): another SaveChanges interceptor committed it first. Open the " +
+                  "transaction yourself around SaveChanges, or assign these entities' keys in code; see " +
+                  "docs/limitations.md.")]
+    private static partial void LogAtomicityLost(ILogger logger, int entries, string correlationId);
+
     [LoggerMessage(EventId = 7100, Level = LogLevel.Debug,
         Message = "Not recording a {Action} of '{EntityName}' ({EntityId}): recording is disabled.")]
     private static partial void LogRecordingDisabled(ILogger logger, AuditAction action, string entityName, string entityId);

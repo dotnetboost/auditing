@@ -49,26 +49,32 @@ namespace DotNetBoost.Auditing.EntityFrameworkCore;
 /// <para>Both disappear if the entity's key is assigned in code — a <c>Guid</c> set by the
 /// application, HiLo, a sequence — because then nothing is deferred.</para>
 ///
-/// <para><b>State is per <see cref="DbContext"/> instance</b>, so several contexts can share one
-/// scope. Context pooling (<c>AddDbContextPool</c>) is not supported: pooled options are built once,
+/// <para>Inside an ambient <c>TransactionScope</c> it opens nothing: the deferred save enlists in
+/// the scope like the primary one, and commits or rolls back with it.</para>
+///
+/// <para><b>Beside another library's <c>SaveChanges</c> interceptor</b>, in either order: a save the
+/// other issues from inside this one is counted as nested, and when this interceptor owns the
+/// transaction and another follows it, the commit waits for EF's <c>DbContext.SavedChanges</c>
+/// event. See <c>AuditingSaveChangesInterceptor.Lifecycle.cs</c>.</para>
+///
+/// <para><b>State is per <see cref="DbContext"/> instance</b>, and every entry is added to the
+/// context being saved, so several contexts can share one scope. Each must map the audit tables
+/// (<c>ApplyAuditing()</c>). Context pooling (<c>AddDbContextPool</c>) is not supported: pooled options are built once,
 /// from the root provider, and cannot carry per-request services.</para>
 /// </summary>
 /// <param name="services">The scope's provider; the engine is resolved lazily, on first save.</param>
-internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) : SaveChangesInterceptor
+internal sealed partial class AuditingSaveChangesInterceptor(IServiceProvider services) : SaveChangesInterceptor
 {
     private readonly ConditionalWeakTable<DbContext, SaveState> _states = new();
-
-    // Resolved on first use, not injected: the recorder depends on the store, the store on the
-    // DbContext, and this interceptor is created while that DbContext is still being built.
-    private IAuditManager? _audit;
-    private IAuditManager Audit => _audit ??= services.GetRequiredService<IAuditManager>();
 
     private AuditingOptions? _options;
     private AuditingOptions Options => _options ??= services.GetRequiredService<AuditingOptions>();
 
     // The engine itself, not the public interface: this capture decides to skip an entity before
-    // the engine sees it, and the reason for that decision is the engine's to give. Resolved from
-    // the same scope as IAuditManager, so it is the same instance behind it.
+    // the engine sees it, and the reason for that decision is the engine's to give; and it stores
+    // entries in the context being saved, not through the store. Resolved on first use, not
+    // injected: the recorder depends on the store, the store on the DbContext, and this
+    // interceptor is created while that DbContext is still being built.
     private AuditRecorder? _recorder;
     private AuditRecorder Recorder => _recorder ??= services.GetRequiredService<AuditRecorder>();
 
@@ -77,11 +83,9 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     {
         ArgumentNullException.ThrowIfNull(eventData);
 
-        if (eventData.Context is { } context && Begin(context) is { } state)
+        if (eventData.Context is { } context && Saving(context, result) is { } state)
         {
-            Capture(context, state);
-
-            if (state.Deferred.Count > 0 && NeedsOwnTransaction(context))
+            if (NeedsTransactionNow(context, state))
                 state.OwnedTransaction = context.Database.BeginTransaction();
         }
 
@@ -96,11 +100,9 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     {
         ArgumentNullException.ThrowIfNull(eventData);
 
-        if (eventData.Context is { } context && Begin(context) is { } state)
+        if (eventData.Context is { } context && Saving(context, result) is { } state)
         {
-            Capture(context, state);
-
-            if (state.Deferred.Count > 0 && NeedsOwnTransaction(context))
+            if (NeedsTransactionNow(context, state))
             {
                 state.OwnedTransaction = await context.Database
                     .BeginTransactionAsync(cancellationToken)
@@ -116,34 +118,24 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     {
         ArgumentNullException.ThrowIfNull(eventData);
 
-        // IsRecording means this completion belongs to the interceptor's OWN deferred save. Without
-        // this check that save's SavedChanges would record the deferred entries again, save again,
-        // and recurse until the stack ran out.
-        if (eventData.Context is not { } context
-            || !_states.TryGetValue(context, out var state)
-            || state.IsRecording)
-        {
+        if (eventData.Context is not { } context || Saved(context) is not { } state)
             return result;
-        }
 
         try
         {
-            if (state.Deferred.Count > 0)
+            WriteDeferred(context, state);
+
+            if (!DeferCommit(context, state))
             {
-                state.IsRecording = true;
-                RecordDeferred(state);
-
-                // Cleared before the save, not after: nothing may re-run these, whatever happens
-                // next.
-                state.Deferred.Clear();
-                context.SaveChanges();
+                state.OwnedTransaction?.Commit();
+                Finish(context, state);
             }
-
-            state.OwnedTransaction?.Commit();
         }
-        finally
+        catch
         {
+            RollbackQuietly(state);
             Finish(context, state);
+            throw;
         }
 
         return result;
@@ -157,33 +149,26 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     {
         ArgumentNullException.ThrowIfNull(eventData);
 
-        // See SavedChanges: IsRecording means this is the interceptor's own deferred save completing,
-        // and running the deferred pass again would recurse without end.
-        if (eventData.Context is not { } context
-            || !_states.TryGetValue(context, out var state)
-            || state.IsRecording)
-        {
+        if (eventData.Context is not { } context || Saved(context) is not { } state)
             return result;
-        }
 
         try
         {
-            if (state.Deferred.Count > 0)
-            {
-                // Guards the re-entry: this save raises SavingChanges and SavedChanges again, and
-                // the only thing pending is the trail itself.
-                state.IsRecording = true;
-                RecordDeferred(state);
-                state.Deferred.Clear();
-                await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
+            await WriteDeferredAsync(context, state, cancellationToken).ConfigureAwait(false);
 
-            if (state.OwnedTransaction is { } transaction)
-                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            if (!DeferCommit(context, state))
+            {
+                if (state.OwnedTransaction is { } transaction)
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+                Finish(context, state);
+            }
         }
-        finally
+        catch
         {
+            await RollbackQuietlyAsync(state).ConfigureAwait(false);
             Finish(context, state);
+            throw;
         }
 
         return result;
@@ -193,74 +178,84 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     public override void SaveChangesFailed(DbContextErrorEventData eventData)
     {
         ArgumentNullException.ThrowIfNull(eventData);
-
-        if (eventData.Context is not { } context
-            || !_states.TryGetValue(context, out var state)
-            || state.IsRecording)
-        {
-            // A failure in the deferred save itself unwinds through SavedChanges, whose finally
-            // disposes the uncommitted transaction — rolling the change back with it.
-            return;
-        }
-
-        try
-        {
-            // Rolls back the change as well as its trail, which is the point of having opened it.
-            state.OwnedTransaction?.Rollback();
-        }
-        finally
-        {
-            Finish(context, state);
-        }
+        Abort(eventData.Context);
     }
 
     /// <inheritdoc/>
-    public override async Task SaveChangesFailedAsync(
+    public override Task SaveChangesFailedAsync(
         DbContextErrorEventData eventData,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(eventData);
+        return AbortAsync(eventData.Context);
+    }
 
-        if (eventData.Context is not { } context
-            || !_states.TryGetValue(context, out var state)
-            || state.IsRecording)
-        {
-            return;
-        }
+    /// <inheritdoc/>
+    /// <remarks>EF reports a cancelled save here and <b>not</b> through <c>SaveChangesFailed</c>.</remarks>
+    public override void SaveChangesCanceled(DbContextEventData eventData)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        Abort(eventData.Context);
+    }
 
-        try
-        {
-            if (state.OwnedTransaction is { } transaction)
-                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            Finish(context, state);
-        }
+    /// <inheritdoc/>
+    /// <remarks>See <see cref="SaveChangesCanceled"/>.</remarks>
+    public override Task SaveChangesCanceledAsync(
+        DbContextEventData eventData,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        return AbortAsync(eventData.Context);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// EF reports a concurrency conflict here, just before it throws, and <b>not</b> through
+    /// <c>SaveChangesFailed</c> — unless an interceptor suppresses the exception, and then the save
+    /// goes on. Rolled back later, not here: see <see cref="RollBackAfterConflict"/>.
+    /// </remarks>
+    public override InterceptionResult ThrowingConcurrencyException(
+        ConcurrencyExceptionEventData eventData,
+        InterceptionResult result)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+
+        if (!result.IsSuppressed)
+            RollBackAfterConflict(eventData.Context);
+
+        return result;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>See <see cref="ThrowingConcurrencyException"/>.</remarks>
+    public override ValueTask<InterceptionResult> ThrowingConcurrencyExceptionAsync(
+        ConcurrencyExceptionEventData eventData,
+        InterceptionResult result,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+
+        if (!result.IsSuppressed)
+            RollBackAfterConflict(eventData.Context);
+
+        return ValueTask.FromResult(result);
     }
 
     /// <summary>
-    /// The state for this save, or <c>null</c> when this save is the interceptor's own deferred
-    /// write and must not be captured again.
+    /// Whether to open a transaction now: this save has deferred creations, there is none of ours
+    /// yet, and none to rely on. When there is one to rely on, it is remembered, so that
+    /// <c>SavedChanges</c> can tell whether someone committed it early.
     /// </summary>
-    private SaveState? Begin(DbContext context)
+    private static bool NeedsTransactionNow(DbContext context, SaveState state)
     {
-        if (_states.TryGetValue(context, out var existing))
-            return existing.IsRecording ? null : existing;
+        if (state.Deferred.Count == 0 || state.OwnedTransaction is not null)
+            return false;
 
-        var state = new SaveState();
-        _states.Add(context, state);
-        return state;
-    }
+        if (NeedsOwnTransaction(context))
+            return true;
 
-    private void Finish(DbContext context, SaveState state)
-    {
-        state.OwnedTransaction?.Dispose();
-        state.OwnedTransaction = null;
-        state.IsRecording      = false;
-        state.Deferred.Clear();
-
-        _states.Remove(context);
+        state.ReliedOn ??= context.Database.CurrentTransaction;
+        return false;
     }
 
     /// <summary>
@@ -271,9 +266,9 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     /// The tracker is materialised to a list first. Recording adds entities to it, and enumerating
     /// a collection while adding to it is how a capture becomes a capture of itself.
     /// </remarks>
-    private void Capture(DbContext context, SaveState state)
+    private void Capture(DbContext context, SaveState state, List<EntityEntry> entries)
     {
-        var entries = context.ChangeTracker.Entries().ToList();
+        EnsureMapsAuditTables(context);
 
         foreach (var entry in entries)
         {
@@ -344,11 +339,11 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
                 continue;
             }
 
-            Record(write);
+            Record(context, write);
         }
     }
 
-    private void RecordDeferred(SaveState state)
+    private void RecordDeferred(DbContext context, SaveState state)
     {
         foreach (var (entry, write) in state.Deferred)
         {
@@ -358,36 +353,43 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
                     "cannot be recorded. Assign the key in code, or exclude the entity with [AuditIgnore] " +
                     "or IgnoreEntity<T>().");
 
-            Record(write with { EntityId = entityId });
+            Record(context, write with { EntityId = entityId });
         }
     }
 
     /// <summary>
     /// Records through the engine, which applies the model's rules, formats the values and stamps
-    /// the actor, correlation and time.
+    /// the actor, correlation and time — and adds the entry to <paramref name="context"/>, the
+    /// context being saved.
     /// </summary>
     /// <remarks>
-    /// Awaited by completion rather than with <c>await</c>, so the synchronous
-    /// <c>SaveChanges</c> path shares this code. With the EF Core store that is exact rather than
-    /// hopeful: appending only tracks the entity, so the task is already complete when it comes
-    /// back. A store that genuinely went to the database here would be refused rather than blocked
-    /// on.
+    /// Not through the store: the store holds the scope's registered context, and a second context
+    /// in the same scope (another instance, or another type) is a different one. Its entries would
+    /// then be tracked where this save cannot write them.
     /// </remarks>
-    private void Record(AuditWrite write)
+    private void Record(DbContext context, AuditWrite write)
     {
-        var recording = Audit.RecordAsync(write);
+        if (Recorder.Prepare(write) is not { } entry)
+            return;
 
-        if (!recording.IsCompleted)
-        {
-            throw new InvalidOperationException(
-                "The audit store did not complete synchronously. The EF Core capture tracks entries on " +
-                "the context rather than writing them, so it cannot block on a store that goes to the " +
-                "database during Append. Register the EF Core store, or record explicitly through " +
-                "IAuditManager instead of through the interceptor.");
-        }
+        context.Set<AuditEntry>().Add(entry);
+        Created(entry);
+        Recorder.Counted(entry);
+    }
 
-        // Observes the result, so a failure surfaces here rather than as an unobserved exception.
-        recording.GetAwaiter().GetResult();
+    /// <summary>
+    /// Refuses a context that captures changes but has nowhere to keep them, before it writes
+    /// anything.
+    /// </summary>
+    private static void EnsureMapsAuditTables(DbContext context)
+    {
+        if (context.Model.FindEntityType(typeof(AuditEntry)) is not null)
+            return;
+
+        throw new InvalidOperationException(
+            $"{context.GetType().Name} captures its changes with UseAuditing(sp), but its model has no " +
+            "audit tables, and entries are kept in the context being saved. Call " +
+            "modelBuilder.ApplyAuditing() in its OnModelCreating, or remove UseAuditing(sp) from its options.");
     }
 
     /// <summary>
@@ -395,32 +397,14 @@ internal sealed class AuditingSaveChangesInterceptor(IServiceProvider services) 
     /// </summary>
     private static bool NeedsOwnTransaction(DbContext context) =>
         context.Database.CurrentTransaction is null
+        // An ambient TransactionScope already makes the two saves atomic, and EF refuses to begin
+        // a transaction inside one.
+        && System.Transactions.Transaction.Current is null
         // A non-relational provider has none to open.
         && context.Database.IsRelational()
         // A retrying strategy refuses a transaction it did not start, because it could not replay
         // it. Documented on the class rather than worked around here.
         && !context.Database.CreateExecutionStrategy().RetriesOnFailure;
-
-    /// <summary>What one save is holding. Lives for the length of that save and no longer.</summary>
-    private sealed class SaveState
-    {
-        /// <summary>Creations whose key arrives with the INSERT.</summary>
-        public List<Deferred> Deferred { get; } = [];
-
-        /// <summary>The transaction this interceptor opened, or <c>null</c> when the caller had one.</summary>
-        public IDbContextTransaction? OwnedTransaction { get; set; }
-
-        /// <summary>Whether the save now in flight is the interceptor's own deferred write.</summary>
-        public bool IsRecording { get; set; }
-
-        /// <summary>
-        /// The id tying this save's entries together. Taken from the ambient activity when there is
-        /// one, so the trail joins the traces of the request that caused it, and otherwise minted
-        /// here — per save, not per entry.
-        /// </summary>
-        public string CorrelationId { get; } =
-            Activity.Current?.Id ?? Guid.NewGuid().ToString("n", CultureInfo.InvariantCulture);
-    }
 
     private readonly record struct Deferred(EntityEntry Entry, AuditWrite Write);
 }
