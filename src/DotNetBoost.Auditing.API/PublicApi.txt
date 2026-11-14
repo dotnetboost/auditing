@@ -159,6 +159,7 @@ namespace DotNetBoost.Auditing.API
     public sealed class LoggingAuditObserver : DotNetBoost.Auditing.Core.Interfaces.IAuditObserver
     {
         public LoggingAuditObserver(Microsoft.Extensions.Logging.ILogger<DotNetBoost.Auditing.API.LoggingAuditObserver> logger);
+        public void AtomicityLost(string correlationId, int entries);
         public void RecordedWithoutModelRules(string entityName, string entityId, DotNetBoost.Auditing.Core.Models.AuditAction action);
         public void WriteSuppressed(DotNetBoost.Auditing.Core.Models.AuditSuppression reason, string entityName, string entityId, DotNetBoost.Auditing.Core.Models.AuditAction action);
     }

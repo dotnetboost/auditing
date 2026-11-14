@@ -64,6 +64,23 @@ public interface IAuditObserver
     /// </para>
     /// </remarks>
     void RecordedWithoutModelRules(string entityName, string entityId, AuditAction action);
+
+    /// <summary>
+    /// The EF Core capture wrote <paramref name="entries"/> deferred <c>Created</c> entries
+    /// <b>outside</b> the transaction of the change they describe, because another interceptor
+    /// committed that transaction first.
+    /// </summary>
+    /// <param name="correlationId">The save's correlation id, which every one of those entries carries.</param>
+    /// <param name="entries">How many entries were written outside the transaction.</param>
+    /// <remarks>
+    /// Raised only under <see cref="Models.LostAtomicity.Report"/>; <see cref="Models.LostAtomicity.Throw"/>
+    /// fails the save instead. A default implementation that does nothing, so an observer written
+    /// before this member existed still compiles. The fix is in <c>docs/limitations.md</c>: open the
+    /// transaction yourself around <c>SaveChanges</c>, or assign the keys in code.
+    /// </remarks>
+    void AtomicityLost(string correlationId, int entries)
+    {
+    }
 }
 
 /// <summary>

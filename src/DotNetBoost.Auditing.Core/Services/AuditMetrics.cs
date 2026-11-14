@@ -28,6 +28,7 @@ internal sealed class AuditMetrics : IDisposable
     private readonly Counter<long> _recorded;
     private readonly Counter<long> _suppressed;
     private readonly Counter<long> _deleted;
+    private readonly Counter<long> _atomicityLost;
 
     /// <summary>
     /// Creates the instruments on <paramref name="factory"/>'s meter, or on one of its own.
@@ -62,6 +63,9 @@ internal sealed class AuditMetrics : IDisposable
 
         _deleted = meter.CreateCounter<long>(
             AuditingTelemetry.EntriesDeleted, "{entry}", "Audit entries deleted by a prune or an erasure.");
+
+        _atomicityLost = meter.CreateCounter<long>(
+            AuditingTelemetry.AtomicityLost, "{save}", "Saves whose deferred entries were written outside the change's transaction.");
     }
 
     /// <summary>One entry recorded.</summary>
@@ -90,6 +94,9 @@ internal sealed class AuditMetrics : IDisposable
             { AuditingTelemetry.TagAction, Name(action) }
         });
     }
+
+    /// <summary>One save whose deferred entries were written outside the change's transaction.</summary>
+    internal void AtomicityLost() => _atomicityLost.Add(1);
 
     /// <summary><paramref name="count"/> entries deleted by <paramref name="operation"/>.</summary>
     internal void Deleted(int count, string operation)

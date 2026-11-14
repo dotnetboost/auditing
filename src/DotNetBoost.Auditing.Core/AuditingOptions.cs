@@ -1,3 +1,4 @@
+using DotNetBoost.Auditing.Core.Models;
 using DotNetBoost.Auditing.Core.Metadata;
 
 namespace DotNetBoost.Auditing.Core;
@@ -74,6 +75,13 @@ public sealed class AuditingOptions
     /// </para>
     /// </summary>
     public bool RecordUpdatesWithoutBeforeImage { get; set; } = true;
+
+    /// <summary>
+    /// What the EF Core capture does when another interceptor commits the transaction a save ran in
+    /// before the capture has written its deferred <c>Created</c> entries. <see cref="LostAtomicity.Report"/>
+    /// by default.
+    /// </summary>
+    public LostAtomicity OnLostAtomicity { get; set; } = LostAtomicity.Report;
 
     /// <summary>
     /// How long a recorded value may be before it is cut short and

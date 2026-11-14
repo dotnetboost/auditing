@@ -1,6 +1,7 @@
 using DotNetBoost.Auditing.Core;
 using DotNetBoost.Auditing.Core.Interfaces;
 using DotNetBoost.Auditing.Core.Metadata;
+using DotNetBoost.Auditing.Core.Models;
 using DotNetBoost.Auditing.Core.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Diagnostics.Metrics;
@@ -283,6 +284,28 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Options.RecordCreatedValues = false;
             builder.Options.RecordDeletedValues = false;
+            return builder;
+        }
+
+        /// <summary>
+        /// What the EF Core capture does when another <c>SaveChanges</c> interceptor commits the
+        /// transaction a save ran in before the capture has written its deferred <c>Created</c>
+        /// entries, so they can no longer be atomic with the change. <see cref="LostAtomicity.Report"/>
+        /// by default; <see cref="LostAtomicity.Throw"/> is recommended in tests.
+        /// </summary>
+        /// <param name="builder">The builder.</param>
+        /// <param name="behaviour">Report it, or fail the save.</param>
+        /// <returns>The builder, for chaining.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <c>null</c>.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="behaviour"/> is not defined.</exception>
+        public static AuditingBuilder OnLostAtomicity(this AuditingBuilder builder, LostAtomicity behaviour)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+
+            if (!Enum.IsDefined(behaviour))
+                throw new ArgumentOutOfRangeException(nameof(behaviour), behaviour, "Not a LostAtomicity value.");
+
+            builder.Options.OnLostAtomicity = behaviour;
             return builder;
         }
 
