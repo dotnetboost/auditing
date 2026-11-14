@@ -82,10 +82,16 @@ internal sealed class EfCoreHarness : IDisposable
     /// <param name="configure">Applied to the options.</param>
     /// <param name="capture">Whether the context records itself through the interceptor.</param>
     /// <param name="build">Applied to the builder after the declarations, just before <c>Build()</c>.</param>
+    /// <param name="beforeAuditing">Applied to the options before <c>UseAuditing</c>: interceptors added here run first.</param>
+    /// <param name="afterAuditing">Applied to the options after <c>UseAuditing</c>: interceptors added here run after it.</param>
+    /// <param name="sqlite">Applied to the SQLite options, for an execution strategy.</param>
     public EfCoreHarness(
         Action<AuditingOptions>? configure = null,
         bool capture = true,
-        Action<AuditingBuilder>? build = null)
+        Action<AuditingBuilder>? build = null,
+        Action<DbContextOptionsBuilder>? beforeAuditing = null,
+        Action<DbContextOptionsBuilder>? afterAuditing = null,
+        Action<Microsoft.EntityFrameworkCore.Infrastructure.SqliteDbContextOptionsBuilder>? sqlite = null)
     {
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
@@ -94,13 +100,16 @@ internal sealed class EfCoreHarness : IDisposable
 
         services.AddDbContext<TestDbContext>((sp, o) =>
         {
-            o.UseSqlite(_connection);
+            o.UseSqlite(_connection, b => sqlite?.Invoke(b));
             o.AddInterceptors(Saves);
+            beforeAuditing?.Invoke(o);
 
             // Without this line the tables exist and IAuditManager works, but nothing records
             // itself — which is what the "capture off" tests check.
             if (capture)
                 o.UseAuditing(sp);
+
+            afterAuditing?.Invoke(o);
         });
 
         var builder = services.AddAuditing(o => configure?.Invoke(o))
@@ -123,6 +132,9 @@ internal sealed class EfCoreHarness : IDisposable
     }
 
     public MutableActorAccessor Actors { get; } = new();
+
+    /// <summary>The open connection every context in this harness shares.</summary>
+    public SqliteConnection Connection => _connection;
 
     /// <summary>What the engine and the interceptor decided not to record.</summary>
     public RecordingAuditObserver Observer { get; } = new();

@@ -31,4 +31,10 @@ public sealed class RecordingAuditObserver : IAuditObserver
     /// <inheritdoc/>
     public void RecordedWithoutModelRules(string entityName, string entityId, AuditAction action) =>
         WithoutModelRules.Add((entityName, entityId, action));
+
+    /// <summary>Every save reported as having lost its atomicity, in order.</summary>
+    public List<(string CorrelationId, int Entries)> LostAtomicity { get; } = [];
+
+    /// <inheritdoc/>
+    public void AtomicityLost(string correlationId, int entries) => LostAtomicity.Add((correlationId, entries));
 }

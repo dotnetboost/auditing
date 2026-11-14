@@ -19,5 +19,7 @@
       to derive from, so it needs the attributes and assertions without being collected itself.
     -->
     <PackageReference Include="xunit" />
+    <!-- For the interceptors that stand in for another library sharing the context. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
   </ItemGroup>
 </Project>
