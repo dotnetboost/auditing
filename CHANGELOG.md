@@ -3,7 +3,7 @@
 All notable changes to this project are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-preview.3] — 2026-11-14
 
 Makes the EF Core capture safe beside another library's `SaveChanges` interceptor — such as
 DotNetBoost.MultiLingual's — registered before it or after it, with or without a retrying strategy. 543
